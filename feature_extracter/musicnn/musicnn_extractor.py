@@ -190,20 +190,22 @@ def extract_feature(in_folder, out_folder):
     # pre-pocess file name to keep the track id only
     in_files = [x.split('.')[0] for x in in_files]
     out_files = [x.split('.')[0] for x in out_files]
+    in_set = set(in_files)
+    out_set = set(out_files)
+    inter_set = in_set & out_set
+    in_set = in_set - inter_set
     # initialize a extractor
     m_extractor = extractor()
     # iterate music file in in_folder
-    for in_file in tqdm(in_files):
-        # check if the in_file have been extracted
-        if in_file not in out_files:
-            in_file_name = in_folder + '/' + in_file + '.mp3'
-            out_file_name = out_folder + '/' + in_file + '.npy'
-            # feature extraction
-            taggram, labels, features = m_extractor.extract(in_file_name)
-            # save the feature to numpy .npy file (save the 'max_pool' only, which is the last layer)
-            np.save(out_file_name, np.array(features['max_pool']))
-            # add in_file to out_files list
-            out_files.append(in_file)
+    for in_file in tqdm(in_set):
+        in_file_name = in_folder + '/' + in_file + '.mp3'
+        out_file_name = out_folder + '/' + in_file + '.npy'
+        # feature extraction
+        taggram, labels, features = m_extractor.extract(in_file_name)
+        # save the feature to numpy .npy file (save the 'max_pool' only, which is the last layer)
+        np.save(out_file_name, np.array(features['max_pool']))
+        # add in_file to out_files list
+        out_files.append(in_file)
     print("Musicnn Feature extraction complete!")
 
 

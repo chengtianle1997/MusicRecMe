@@ -12,6 +12,7 @@ password=api_key.read_mysql_keys()
 database_name = 'musicdb'
 
 echo_nest_table_name = 'echonest'
+echo_nest_filter_table = 'echofilter'
 million_song_link_table_name = 'millionsonglink'
 spotify_table_name = 'spotify'
 song_table_name = 'songs'
@@ -71,8 +72,20 @@ class MusicDB(object):
                 print("Table {} has already been existed.".format(echo_nest_table_name))
         if not is_echo_nest_table_exist:
             sql_cmd = "CREATE TABLE {} (userid VARCHAR(255), playlist JSON, playlist_length INT, \
-                none_audio_lyric INT, audio_only INT, lyric_only INT, audio_lyric INT, completeness FLOAT)"\
-                .format(echo_nest_table_name)
+                none_audio_lyric INT, audio_only INT, lyric_only INT, audio_lyric INT, completeness FLOAT, \
+                is_valid BOOLEAN DEFAULT 0)".format(echo_nest_table_name)
+            self.mycursor.execute(sql_cmd)
+
+        # Create echo nest filter table
+        is_echo_nest_filter_exist = False
+        self.mycursor.execute("SHOW TABLES")
+        for x in self.mycursor:
+            if x[0] == echo_nest_filter_table:
+                is_echo_nest_filter_exist = True
+                print("Table {} has already been existed.".format(echo_nest_filter_table))
+        if not is_echo_nest_filter_exist:
+            sql_cmd = "CREATE TABLE {} (userid VARCHAR(255), playlist JSON, playlist_length INT, \
+                old INT, new INT)".format(echo_nest_filter_table)
             self.mycursor.execute(sql_cmd)
 
         # Create million song link table 
@@ -262,8 +275,11 @@ class MusicDB(object):
             "lyric": row[8],
             "echo_song_id": row[9],
             'is_spotify': row[10],
-            "preview_url": row[13],
-            "audio_features": row[14],
+            "lang": row[11],
+            "genre_top": row[12],
+            "genre_raw": row[13],
+            "preview_url": row[14],
+            "audio_features": row[15],
         }
         return song_dict
 
@@ -410,6 +426,12 @@ class MusicDB(object):
         self.mycursor.execute(sql_cmd)
         self.mydb.commit()
 
+    def update_audio_lyric_stat(self, track_id, audio, lyric):
+        sql_cmd = "UPDATE {} SET audio='{}', lyric='{}' WHERE trackid='{}'"\
+            .format(song_table_name, audio, lyric, track_id)
+        self.mycursor.execute(sql_cmd)
+        self.mydb.commit()
+
     # Read rows from echo nest table
     # Input:
     # start: start index
@@ -427,9 +449,54 @@ class MusicDB(object):
                 res.append({
                     'user_id': row[0],
                     'playlist': row[1],
-                    'playlist_length': row[2]
+                    'playlist_length': row[2],
+                    "audio_lyric": row[6],
+                    "completeness": row[7],
+                    "is_valid": row[8]
+                })
+            return res
+        else:
+            return None
+
+    def update_echo_nest(self, user_id, playlist, audio_lyric, completeness, is_valid):
+        sql_cmd = "UPDATE {} ".format(echo_nest_table_name) + \
+         "SET playlist=%s, audio_lyric=%s, completeness=%s, is_valid=1 WHERE userid=%s"
+        val = (playlist, audio_lyric, completeness, user_id)
+        self.mycursor.execute(sql_cmd, val)
+        self.mydb.commit()
+
+    # Insert and read echo nest filter table (for generating dataset and sub-dataset)
+    def insert_echo_nest_filter(self, val):
+        sql_cmd = "INSERT INTO {} (userid, playlist, playlist_length, old, new\
+            )".format(echo_nest_filter_table)\
+            + " VALUE (%s, %s, %s, %s, %s)"
+        self.mycursor.execute(sql_cmd, val)
+        self.mydb.commit()
+
+    def read_echo_nest_filter(self, start, length):
+        sql_cmd = "SELECT * FROM {} LIMIT {}, {}"\
+            .format(echo_nest_filter_table, start, start + length)
+        self.mycursor.execute(sql_cmd)
+        if self.mycursor.rowcount > 0:
+            res = []
+            for row in self.mycursor:
+                res.append({
+                    'user_id': row[0],
+                    'playlist': row[1],
+                    'playlist_length': row[2],
+                    "old": row[3],
+                    "new": row[4]
                 })
         else:
             return None
+
+    def check_if_user_exists_filter(self, user_id):
+        sql_cmd = "SELECT * FROM {}".format(echo_nest_filter_table)\
+            + " WHERE userid='{}'".format(user_id)
+        self.mycursor.execute(sql_cmd)
+        if self.mycursor.rowcount > 0:
+            return True
+        else:
+            return False
 
         

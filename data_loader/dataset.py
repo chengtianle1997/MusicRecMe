@@ -13,6 +13,7 @@ import getopt
 import os
 import argparse
 from langdetect import detect
+import langTag
 
 # Init the database
 db = musicdb.MusicDB()
@@ -20,6 +21,7 @@ db = musicdb.MusicDB()
 # Init the APIs
 sp_api = spotifyApi.Spotify()
 ly_api = lyricGenius.LyricGenius()
+lf_api = lastFM.lastFM()
 
 # path to dataset files
 msd_link_txt_n = 'dataset/unique_tracks.txt'
@@ -141,6 +143,19 @@ def load_echo_nest(echo_nest_txt, start_line=0):
                         sp_res_dict['artist_name'])
                         # add key to song dictionary
                         sp_res_dict['lyric'] = 1 if lg_res is True else 0
+                        # add genre tag
+                        genre_raw, genre_top = lf_api.get_tag(sp_res_dict['artist_name'], sp_res_dict['track_name'])
+                        sp_res_dict['genre_raw'] = genre_raw
+                        sp_res_dict['genre_top'] = genre_top
+                        # add language tag
+                        lang_tag = None
+                        if lg_res is True:
+                            track_ly = sp_res_dict['track_id']
+                            if not track_ly.find("spotify") == -1:
+                                track_ly = track_ly.split(":")[2]
+                            track_ly_url = "{}/{}.txt".format(ly_api.lyric_path, track_ly)
+                            lang_tag = langTag.get_lang_tag(track_ly_url)
+                        sp_res_dict['lang'] = lang_tag
                         # get value format and add it to sql_val_list
                         # ret is a dictionary, while sql_val_list is a () with sql values
                         ret = sp_res_dict
@@ -167,7 +182,20 @@ def load_echo_nest(echo_nest_txt, start_line=0):
                     lg_res = ly_api.search_track(sp_res_dict['track_id'], sp_res_dict['track_name'],\
                         sp_res_dict['artist_name'])
                     # add key to song dictionary
-                    sp_res_dict['lyric'] = 1 if lg_res is not None else 0
+                    sp_res_dict['lyric'] = 1 if lg_res is True else 0
+                    # add genre tag
+                    genre_raw, genre_top = lf_api.get_tag(sp_res_dict['artist_name'], sp_res_dict['track_name'])
+                    sp_res_dict['genre_raw'] = genre_raw
+                    sp_res_dict['genre_top'] = genre_top
+                    # add language tag
+                    lang_tag = None
+                    if lg_res is True:
+                        track_ly = sp_res_dict['track_id']
+                        if not track_ly.find("spotify") == -1:
+                            track_ly = track_ly.split(":")[2]
+                        track_ly_url = "{}/{}.txt".format(ly_api.lyric_path, track_ly)
+                        lang_tag = langTag.get_lang_tag(track_ly_url)
+                    sp_res_dict['lang'] = lang_tag
                     # get value format and add it to sql_val_list
                     # ret is a dictionary, while sql_val_list is a () with sql values
                     ret = sp_res_dict
@@ -259,7 +287,7 @@ def load_spotify_mpd(spotify_path, start_doc_idx=0, start_playlist_idx=0):
                     lg_res = ly_api.search_track(ret['track_id'], ret['track_name'],\
                         ret['artist_name'])
                     # add key to song dictionary
-                    ret['lyric'] = 1 if lg_res is not None else 0
+                    ret['lyric'] = 1 if lg_res is True else 0
                     # add the track to song table
                     sql_val_list = []
                     sql_val_list.append(db.get_song_val(ret))
@@ -401,6 +429,7 @@ if __name__ == '__main__':
 
     sp_api = spotifyApi.Spotify(args.root)
     ly_api = lyricGenius.LyricGenius(args.root)
+    lf_api = lastFM.lastFM(args.root)
 
     if args.echo:
         print("Load Echo Nest Dataset from line {}.".format(args.line))

@@ -18,7 +18,7 @@ lastFM_tag_txt = 'dataset/lastfm_unique_tags.txt'
 MAX_TAG_NUM = 200
 
 class lastFM(object):
-    def __init__(self, dataset_root):
+    def __init__(self, dataset_root='E:'):
         f_path = dataset_root + '/' + lastFM_tag_txt
         # Get the tag list
         try:
@@ -51,7 +51,7 @@ class lastFM(object):
             track = self.network.get_track(artist, song_title)
             tags = track.get_top_tags()
         except:
-            print("Cannot find track: {}, artist: {}".format(song_title, artist))
+            print("LastFM: Cannot find track: {}, artist: {}".format(song_title, artist))
             return {}, {}
         # Return two dictionary: 
         # res (all tags in tag set) and res_sorted (Top 5 tags only)

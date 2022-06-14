@@ -1,4 +1,4 @@
-import langdetect
+from langdetect import detect
 
 # Get language tag from langdetect API
 # Input:

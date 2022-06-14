@@ -9,7 +9,7 @@ hostname = "localhost"
 user="root"
 password=api_key.read_mysql_keys()
 
-database_name = 'musicdb'
+database_name = 'musicdbn'
 
 echo_nest_table_name = 'echonest'
 echo_nest_filter_table = 'echofilter'
@@ -18,7 +18,7 @@ spotify_table_name = 'spotify'
 song_table_name = 'songs'
 
 class MusicDB(object):
-    def __init__(self):
+    def __init__(self, database=database_name):
         # Check if the database exist
         self.create_database()
         # Init the cursor for database
@@ -26,7 +26,7 @@ class MusicDB(object):
             host=hostname,
             user=user,
             password=password,
-            database=database_name
+            database=database
         )
         self.mycursor = self.mydb.cursor(buffered=True)
         # Check if the table exist
@@ -175,8 +175,9 @@ class MusicDB(object):
     #      echosongid('None' or string), audiofeature(json)), (...), (...)]
     def insert_song(self, val):
         sql_cmd = "INSERT INTO {} (trackid, trackname, albumid, albumname, artistid, artistname, \
-            release_date, audio, lyric, echosongid, is_spotify, preview_url, audiofeature)".format(song_table_name)\
-            + "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            release_date, audio, lyric, echosongid, is_spotify, lang, genre_top, genre_raw, preview_url, \
+            audiofeature)".format(song_table_name) \
+            + "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
         self.mycursor.executemany(sql_cmd, val)
         self.mydb.commit()
     
@@ -287,14 +288,16 @@ class MusicDB(object):
     def get_song_val_echo(self, song_dict):
         val = (song_dict["track_id"], str(song_dict["track_name"]), song_dict["album_id"], str(song_dict["album_name"]), \
             song_dict["artist_id"], str(song_dict["artist_name"]), song_dict["release_date"], song_dict["audio"], \
-                song_dict["lyric"], song_dict["echo_song_id"], '0', song_dict["preview_url"], json.dumps(song_dict["audio_features"]))
+            song_dict["lyric"], song_dict["echo_song_id"], '0', song_dict["lang"], json.dumps(song_dict["genre_top"]), \
+            json.dumps(song_dict["genre_raw"]), song_dict["preview_url"], json.dumps(song_dict["audio_features"]))
         return val
 
     # Get val format for song table (without echo nest song id, for spotify dataset)
     def get_song_val(self, song_dict):
         val = (song_dict["track_id"], str(song_dict["track_name"]), song_dict["album_id"], str(song_dict["album_name"]), \
             song_dict["artist_id"], str(song_dict["artist_name"]), song_dict["release_date"], song_dict["audio"], \
-                song_dict["lyric"], '0', '1', song_dict["preview_url"], json.dumps(song_dict["audio_features"]))
+            song_dict["lyric"], '0', '1', song_dict["lang"], json.dumps(song_dict["genre_top"]), json.dumps(song_dict["genre_raw"]),\
+            song_dict["preview_url"], json.dumps(song_dict["audio_features"]))
         return val
         
     # Insert row to echo nest table

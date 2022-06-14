@@ -7,6 +7,7 @@ import requests
 from fuzzywuzzy import fuzz
 import os
 import api_key
+import datetime
 
 # API client id and secret (from spotify dashboard)
 keys = api_key.read_spotify_keys()
@@ -29,6 +30,14 @@ music_path = 'dataset/base/music'
 # "audio_features": audio feature dictionary,
 # "preview_url": preview url to download the audio file
 # }
+
+# check if the song is a new song
+def is_valid(time, thres='2012-01-01'):
+    if time is None:
+        return False
+    time_date = datetime.datetime.strptime(time, '%Y-%m-%d').date()
+    thres_date = datetime.datetime.strptime(thres, '%Y-%m-%d').date()
+    return time_date < thres_date
 
 
 class Spotify(object):
@@ -145,7 +154,10 @@ class Spotify(object):
         }
         if track_name is None:
             return res_dict
-        query_cmd = 'track:{}'.format(track_name)
+        if artist is not None:
+            query_cmd = 'track:{}, artist:{}'.format(track_name, artist)
+        else:
+            query_cmd = 'track:{}'.format(track_name)
         try:
             res = self.sp.search(q=query_cmd, type='track', limit=5)
         except:
@@ -154,17 +166,30 @@ class Spotify(object):
         if len(res['tracks']['items']) == 0:
             return res_dict
         # ratio score list
-        ratio_list = []
-        for idx, track in enumerate(res['tracks']['items']):
-            # compare the search result with the given artist name
-            if artist is not None:
-                # if there is more than one artist, choose the most similar one
-                ratio_list.append(max([fuzz.ratio(artist, x['name']) for x in track['artists']]))
-        # if the artist name is not given, choose the first one
+        # ratio_list = []
+        # for idx, track in enumerate(res['tracks']['items']):
+        #     # compare the search result with the given artist name
+        #     if artist is not None:
+        #         # if there is more than one artist, choose the most similar one
+        #         ratio_list.append(max([fuzz.ratio(artist, x['name']) for x in track['artists']]))
+
         max_id = 0
+        # select the track with proper release date (before 2012-01-01)
+        for idx in range(0, len(res['tracks']['items'])):
+            release_date_i = res['tracks']['items'][idx]['album']['release_date']
+            # check release date
+            ymd = release_date_i.split('-')
+            if len(ymd) == 2:
+                release_date_i += '-01'
+            elif len(ymd) == 1:
+                release_date_i += '-01-01'
+            if is_valid(release_date_i):
+                max_id = idx
+                break
+        
         # if the artist name is given, choose the most similar name
-        if artist is not None:
-            max_id = ratio_list.index(max(ratio_list))
+        # if artist is not None:
+        #     max_id = ratio_list.index(max(ratio_list))
         # take the track id, release date, preview url 
         track_id = res['tracks']['items'][max_id]['uri']
         album_id = res['tracks']['items'][max_id]['album']['uri']

@@ -431,9 +431,6 @@ if __name__ == '__main__':
     parser.add_argument('--lastfm', '-f', action='store_true', help='Load LastFM tags from API')
     parser.add_argument('--lang', '-g', action='store_true', help='Load language tag from langdetect API ')
 
-    # Analyze database
-    parser.add_argument('--tailor_echo', '-t', action='store_true', help='Pre-process Echo Nest Dataset')
-
     args = parser.parse_args()
     
     msd_link_txt = args.root + '/' + msd_link_txt_n

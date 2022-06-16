@@ -15,8 +15,8 @@
                 
                 // For Echo Nest
 
-                "-e",
-                "-l", "0"
+                // "-e",
+                // "-l", "0"
 
                 // For Spotify
 
@@ -34,6 +34,15 @@
 
                 // For million playlist link
                 // "-m"
+
+                // Analyze database
+                // Validate
+                "-e",
+                "-v"
+
+                // Generate
+                // "-e",
+                // "-g"
 
 
             ]

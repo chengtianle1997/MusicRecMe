@@ -8,6 +8,7 @@ import os
 import json
 import langTag
 import datetime
+import argparse
 
 # Init database
 db = musicdb.MusicDB()
@@ -31,7 +32,7 @@ def is_new(time, thres):
     thres_date = datetime.datetime.strptime(thres, '%Y-%m-%d').date()
     return time_date >= thres_date
 
-def is_valid(time, thres):
+def is_valid(time, thres='2011-02-08'):
     if time is None:
         return False
     time_date = datetime.datetime.strptime(time, '%Y-%m-%d').date()
@@ -243,7 +244,7 @@ def valid_echo_nest_pre(dataset_root, line_num=1000, old_new_gap='2018-01-01', s
     pbar.close()  
 
 # validate echo nest raw table, and update echo nest filtered table (latest version)
-def valid_echo_nest(dataset_root, line_num=1000, old_new_gap='2018-01-01', sub=True):
+def valid_echo_nest(dataset_root, line_num=1000, old_new_gap='2008-01-01', sub=True):
     # set path to each folder
     music_path = dataset_root + '/' + _music_path
     lyric_path = dataset_root + '/' + _lyric_path
@@ -262,7 +263,7 @@ def valid_echo_nest(dataset_root, line_num=1000, old_new_gap='2018-01-01', sub=T
     start_line = 0
 
     # line_num is None means read all data from echo nest raw table
-    while valid_line_count < line_num or line_num is None:
+    while line_num is None or valid_line_count < line_num:
         # Get rows from echo nest table
         rows = db.read_echo_nest(start_line, MAX_LINE_LIMIT)
         start_line += MAX_LINE_LIMIT
@@ -326,8 +327,8 @@ def valid_echo_nest(dataset_root, line_num=1000, old_new_gap='2018-01-01', sub=T
                     lang_tag = song_dict["lang"]
                     # check release date
                     release_date = song_dict['release_date']
-                    # delete the song after '2012-01-01' for echo nest do not have song after that time
-                    date_is_valid = is_valid(release_date, '2012-01-01')
+                    # delete the song after '2011-02-08' for echo nest do not have song after that time
+                    date_is_valid = is_valid(release_date)
                     # check if need to update audio and lyric status
                     if audio != int(song_dict["audio"]) or lyric != int(song_dict["lyric"]):
                         db.update_audio_lyric_stat(track_id, audio, lyric)
@@ -340,7 +341,7 @@ def valid_echo_nest(dataset_root, line_num=1000, old_new_gap='2018-01-01', sub=T
                     # Condition filter ----------------------------------------------
                     # check if it is a English song with audio and lyric
                     if lang_tag == 'en' and audio == 1 and lyric == 1 and date_is_valid:
-                        song_json_idx = get_filtered_song_dict(song_dict, old_new_gap, True)
+                        song_json_idx = get_filtered_song_dict_comp(song_dict, old_new_gap, True)
                         new_playlist.append(song_json_idx)
                         if song_json_idx['is_new'] == 1:
                             new_count += 1
@@ -348,7 +349,7 @@ def valid_echo_nest(dataset_root, line_num=1000, old_new_gap='2018-01-01', sub=T
                             old_count += 1
                     else:
                         # for invalid song
-                        song_json_idx = get_filtered_song_dict(song_dict, old_new_gap, False)
+                        song_json_idx = get_filtered_song_dict_comp(song_dict, old_new_gap, False)
                     # save to song json
                     song_json[track_id] = song_json_idx
                     # # dump into json file
@@ -471,7 +472,7 @@ def save_song_json(url, song_json):
 MIN_LENGTH_OLD = 5
 
 # generate json file from echo nest filter table
-def generate_dataset(dataset_root, database='musicdb', line_num=None, old_new_gap='2018-01-01', sub=True):
+def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_gap='2008-01-01', sub=True):
     # use the previous dataset
     db = musicdb.MusicDB(database)
     # set path to each folder
@@ -639,5 +640,32 @@ def generate_dataset(dataset_root, database='musicdb', line_num=None, old_new_ga
 
 if __name__ == '__main__':
     
-    valid_echo_nest('E:')
+    parser = argparse.ArgumentParser(description='Generate Echo Nest / Spotify Million Playlist Dataset from MySQL database')
+
+    # Analyze dataset
+    parser.add_argument('--echo', '-e', action='store_true', help='Generate Echo Nest Dataset')
+    #parser.add_argument('--spotify', '-s', action='store_true', help='Generate Spotify Million Playlist Dataset')
+
+    parser.add_argument('--valid', '-v', action='store_true', help='Validate dataset')
+    parser.add_argument('--gen', '-g', action='store_true', help='Generate dataset')
+    parser.add_argument('--root', '-r', type=str, default='E:', help='Dataset root Path (the path where the dataset folder in)')
+    parser.add_argument('--thres', '-t', type=str, default='2011-01-01', help='The threshold for new and old song (designed for a cold start scenario)')
+    parser.add_argument('--num', '-n', type=int, default=0, help='The number of playlist you would like to collect')
+
+    args = parser.parse_args()
+
+    line_count = None
+    if args.num > 0:
+        line_count = args.num
+
+    if args.echo:
+        if args.valid:
+            valid_echo_nest(args.root, old_new_gap=args.thres, line_num=line_count)
+        elif args.gen:
+            generate_dataset(args.root, old_new_gap=args.thres, line_num=line_count)
+        else:
+            print("You are supposed to specify the mode -v or -g, to validate and generate the dataset")
+            print("Note: Rememeber to validate (-v) first, and then generate (-g)!")
+
+    # valid_echo_nest('E:')
     # generate_dataset('E:/dataset_old', line_num=None)

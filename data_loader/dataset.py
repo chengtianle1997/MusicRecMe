@@ -288,6 +288,19 @@ def load_spotify_mpd(spotify_path, start_doc_idx=0, start_playlist_idx=0):
                         ret['artist_name'])
                     # add key to song dictionary
                     ret['lyric'] = 1 if lg_res is True else 0
+                    # add genre tag
+                    genre_raw, genre_top = lf_api.get_tag(ret['artist_name'], ret['track_name'])
+                    ret['genre_raw'] = genre_raw
+                    ret['genre_top'] = genre_top
+                    # add language tag
+                    lang_tag = None
+                    if lg_res is True:
+                        track_ly = ret['track_id']
+                        if not track_ly.find("spotify") == -1:
+                            track_ly = track_ly.split(":")[2]
+                        track_ly_url = "{}/{}.txt".format(ly_api.lyric_path, track_ly)
+                        lang_tag = langTag.get_lang_tag(track_ly_url)
+                    ret['lang'] = lang_tag
                     # add the track to song table
                     sql_val_list = []
                     sql_val_list.append(db.get_song_val(ret))

@@ -461,6 +461,33 @@ class MusicDB(object):
         else:
             return None
 
+    # Read rows from echo nest table filtered with audio_lyric threshold
+    # Input:
+    # start: start index
+    # length: number of rows to read
+    # audio_lyric_thres: audio_lyric threshold
+    # Return:
+    # success: [(user_id, playlist json, playlist_length), (...), ...] list of tuples
+    # fail: None
+    def read_filtered_echo_nest(self, start, length, audio_lyric_thres):
+        sql_cmd = "SELECT * FROM {} WHERE audio_lyric>={} LIMIT {}, {}"\
+            .format(echo_nest_table_name, audio_lyric_thres, start, start + length)
+        self.mycursor.execute(sql_cmd)
+        if self.mycursor.rowcount > 0:
+            res = []
+            for row in self.mycursor:
+                res.append({
+                    'user_id': row[0],
+                    'playlist': row[1],
+                    'playlist_length': row[2],
+                    "audio_lyric": row[6],
+                    "completeness": row[7],
+                    "is_valid": row[8]
+                })
+            return res
+        else:
+            return None
+
     def update_echo_nest(self, user_id, playlist, audio_lyric, completeness, is_valid):
         sql_cmd = "UPDATE {} ".format(echo_nest_table_name) + \
          "SET playlist=%s, audio_lyric=%s, completeness=%s, is_valid=1 WHERE userid=%s"
@@ -476,9 +503,10 @@ class MusicDB(object):
         self.mycursor.execute(sql_cmd, val)
         self.mydb.commit()
 
+    # Read filtered echo nest table
     def read_echo_nest_filter(self, start, length):
         sql_cmd = "SELECT * FROM {} LIMIT {}, {}"\
-            .format(echo_nest_filter_table, start, start + length)
+            .format(echo_nest_filter_table, start, length)
         self.mycursor.execute(sql_cmd)
         if self.mycursor.rowcount > 0:
             res = []
@@ -490,6 +518,36 @@ class MusicDB(object):
                     "old": row[3],
                     "new": row[4]
                 })
+        else:
+            return None
+
+    # Read filtered echo nest table count according to an old_num_thres
+    def read_echo_nest_filter_count(self, old_num_thres):
+        sql_cmd = "SELECT COUNT(*) FROM {} WHERE old>{}"\
+            .format(echo_nest_filter_table, old_num_thres)
+        self.mycursor.execute(sql_cmd)
+        if self.mycursor.rowcount > 0:
+            for row in self.mycursor:
+                return row[0]
+        else:
+            return None
+    
+    # Read filtered echo nest table sorted by new/length
+    def read_echo_nest_filter_sorted(self, start, length, old_num_thres):
+        sql_cmd = "SELECT * FROM {} WHERE old>{} ORDER BY new/playlist_length LIMIT {}, {}"\
+            .format(echo_nest_filter_table, old_num_thres, start, length)
+        self.mycursor.execute(sql_cmd)
+        if self.mycursor.rowcount > 0:
+            res = []
+            for row in self.mycursor:
+                res.append({
+                    'user_id': row[0],
+                    'playlist': row[1],
+                    'playlist_length': row[2],
+                    "old": row[3],
+                    "new": row[4]
+                })
+            return res
         else:
             return None
 

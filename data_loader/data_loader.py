@@ -2,6 +2,7 @@ import os
 import json
 import numpy as np
 from tqdm import tqdm
+import pickle
 
 # Path to generated dataset
 echo_nest_sub_path = 'dataset/echo_nest/sub_data/'
@@ -71,7 +72,24 @@ class Dataset(object):
             self.audio_mat = self.load_audio_features(merge='avg')
             if self.audio_mat is None:
                 exit(0)
-
+        # load lyric matrix
+        if self.lyric is not None:
+            pass
+        # load song matrix
+        self.song_mat = self.get_song_mat()
+        # load train and test song matrix
+        self.train_song_dict, self.train_song_matrix = \
+            self.get_train_test_song_mat(self.train_song_json_url, set_tag='train')
+        self.test_song_dict, self.test_song_matrix = \
+            self.get_train_test_song_mat(self.test_song_json_url, set_tag='test')
+        # load training set
+        train_mat = self.load_data(self.train_folder, set_tag='train')
+        valid_mat = self.load_data(self.valid_folder, set_tag='valid')
+        test_mat = self.load_data(self.test_folder, set_tag='test')
+        if train_mat is None or valid_mat is None or test_mat is None:
+            exit(0)
+        
+    
     # load json file as a dictionary
     def load_json(self, json_url):
         try:
@@ -82,7 +100,94 @@ class Dataset(object):
         json_cont = json.load(jsonf)
         return json_cont
 
-    # load song json as a dictionary
+    # load train, valid and test set:
+    def load_data(self, data_folder, set_tag='train'):
+        data_mat_path = self.outdir + "{}_mat.pkl".format(set_tag)
+        # check if cache file exists
+        if os.path.exists(data_mat_path):
+            with open(data_mat_path, 'rb') as f:
+                data_mat = pickle.load(f)
+            print("Load existed {} matrix cache successfully!".format(set_tag))
+            return data_mat
+        # load data matrix from json file
+        print("Load data matrix from {}...".format(data_folder))
+        data_mat = []
+        if not os.path.exists(data_folder):
+            print("[Dataset] {} folder not exists!".format(data_folder))
+            return None
+        json_files = os.listdir(data_folder)
+        if len(json_files) < 1:
+            print("[Dataset] No json file found in {}!".format(data_folder))
+            return None
+        for idx in range(len(json_files)):
+            print("Load json file {} ({}/{})".format(json_files[idx], idx + 1, len(json_files)))
+            data_raw = self.load_json(data_folder + '/' + json_files[idx])
+            for data in tqdm(data_raw):
+                data_x = data['x']
+                data_y = data['y']
+                data_x_n = [track['track_id'] for track in data_x]
+                data_y_n = [track['track_id'] for track in data_y]
+                data_mat.append({'x': data_x_n, 'y': data_y_n})
+        print("{} data loaded: {}".format(set_tag, len(data_mat)))
+        # save to cache file
+        with open(data_mat_path, 'wb') as f:
+            pickle.dump(data_mat, f)
+        return data_mat
+
+    # get song matrix from: song dictionary, genre matrix, meta matrix, 
+    #                       audio matrix and lyric matrix
+    def get_song_mat(self):
+        song_mat_path = self.outdir + 'song_mat.npy'
+        # check if there is song matrix cache exists
+        if os.path.exists(song_mat_path):
+            song_mat = np.load(song_mat_path)
+            print("Load existed song matrix cache successfully!")
+            return song_mat
+        # load song matrix
+        print("No song dictionary cache exists, generate new one...")
+        # add an empty column at the beginning
+        song_mat = np.zeros((len(self.song_dict), 1))
+        if self.genre is True:
+            song_mat = np.hstack([song_mat, self.genre_mat])
+        if self.meta is True:
+            song_mat = np.hstack([song_mat, self.meta_mat])
+        if self.audio is not None:
+            song_mat = np.hstack([song_mat, self.audio_mat])
+        if self.lyric is not None:
+            song_mat = np.hstack([song_mat, self.lyric_mat])
+        # delete the first column
+        song_mat = song_mat[:, 1:]
+        # save to cache file
+        np.save(song_mat_path, song_mat)
+        return song_mat
+    
+    # get train and test song matrix: set_tag = 'train' or 'test'
+    def get_train_test_song_mat(self, song_json_path, set_tag='train'):
+        set_song_dict_path = self.outdir + '{}_song_dict.npy'.format(set_tag)
+        set_song_mat_path = self.outdir + '{}_song_mat.npy'.format(set_tag)
+        # check if train cache file exists
+        if os.path.exists(set_song_dict_path) and os.path.exists(set_song_mat_path):
+            set_song_dict = np.load(set_song_dict_path, allow_pickle='TRUE').item()
+            set_song_mat = np.load(set_song_mat_path)
+            print("Load existed {} song dictionary and matrix cache successfully!".format(set_tag))
+            return set_song_dict, set_song_mat
+        # load song dict
+        print("No {} song dictionary cache exists, load it from {}...".format(set_tag, song_json_path))
+        set_song_dict = {}
+        set_song_json = self.load_json(song_json_path)
+        print("Load {} song dictionary...".format(set_tag))
+        for track_id in tqdm(set_song_json.keys()):
+            set_song_dict[track_id] = len(set_song_dict)
+        print("Load {} song matrix...".format(set_tag))
+        set_song_mat = np.zeros((len(set_song_dict), self.song_mat.shape[1]))
+        for track_id in tqdm(set_song_dict.keys()):
+            set_song_mat[set_song_dict[track_id], :] = self.song_mat[self.song_dict[track_id], :]
+        # save to cache file
+        np.save(set_song_dict_path, set_song_dict)
+        np.save(set_song_mat_path, set_song_mat)
+        return set_song_dict, set_song_mat
+        
+    # load song json as a dictionary: key: track id, value: track index for other matrices
     def load_song_dict(self):
         song_dict_path = self.outdir + song_dict_name
         # check if there is song dictionary cache exists
@@ -133,7 +238,7 @@ class Dataset(object):
             if tags is None:
                 continue
             for genre_tag in tags.keys():
-                genre_mat[self.song_dict[track_id]][genre_dict[genre_tag]] = float(tags[genre_tag]) / 100
+                genre_mat[self.song_dict[track_id], genre_dict[genre_tag]] = float(tags[genre_tag]) / 100
         # save genre dictionary and matrix as cache file
         np.save(genre_dict_path, genre_dict)
         np.save(genre_mat_path, genre_mat)
@@ -155,7 +260,7 @@ class Dataset(object):
             if meta_info is None:
                 continue
             for meta_key in meta_dict.keys():
-                meta_mat[self.song_dict[track_id]][meta_dict[meta_key]] = meta_info[meta_key]
+                meta_mat[self.song_dict[track_id], meta_dict[meta_key]] = meta_info[meta_key]
         # standardize the features
         meta_mat = (meta_mat - meta_mat.min(axis=0)) / meta_mat.ptp(axis=0)
         # save meta matrix as cache file
@@ -203,7 +308,7 @@ class Dataset(object):
                     if merge == 'max':
                         track_mat = track_mat.max(axis=0)
                     # save to audio matrix
-                    audio_mat[self.song_dict[ori_track_id]][:] = track_mat
+                    audio_mat[self.song_dict[ori_track_id], :] = track_mat
                 else:
                     unfound_track_counter += 1
                     print("[Audio feature]Unfound track No.{}: {}".format(unfound_track_counter, ori_track_id))

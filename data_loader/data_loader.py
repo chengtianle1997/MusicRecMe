@@ -21,6 +21,9 @@ meta_dict = {'key': 0, 'tempo': 1, 'energy': 2, 'valence': 3, 'liveness': 4, 'lo
     'duration_ms': 6, 'speechiness': 7, 'acousticness': 8, 'danceability': 9, 'time_signature': 10, \
     'instrumentalness': 11, 'mode': 12}
 
+audio_feature_list = ['musicnn']
+lyric_feature_list = ['tf-idf', 'doc2vec']
+
 class Dataset(object):
 
     # dataset_root: root for the dataset folder
@@ -63,6 +66,11 @@ class Dataset(object):
         # load meta matrix
         if self.meta is True:
             self.meta_mat = self.load_meta_dict()
+        # load audio matrix
+        if self.audio is not None:
+            self.audio_mat = self.load_audio_features(merge='avg')
+            if self.audio_mat is None:
+                exit(0)
 
     # load json file as a dictionary
     def load_json(self, json_url):
@@ -111,7 +119,10 @@ class Dataset(object):
         print("No genre cache file exists, load it from song json...")
         genre_dict = {}
         for track_id in tqdm(self.song_dict.keys()):
-            for genre_tag in json.loads(self.song_json[track_id][tag]).keys():
+            tags = json.loads(self.song_json[track_id][tag])
+            if tags is None:
+                continue
+            for genre_tag in tags.keys():
                 if not genre_tag in genre_dict.keys():
                     genre_dict[genre_tag] = len(genre_dict)
         # load genre matrix
@@ -119,6 +130,8 @@ class Dataset(object):
         genre_mat = np.zeros((len(self.song_dict), len(genre_dict)), dtype=np.float32)
         for track_id in tqdm(self.song_dict.keys()):
             tags = json.loads(self.song_json[track_id][tag])
+            if tags is None:
+                continue
             for genre_tag in tags.keys():
                 genre_mat[self.song_dict[track_id]][genre_dict[genre_tag]] = float(tags[genre_tag]) / 100
         # save genre dictionary and matrix as cache file
@@ -149,10 +162,57 @@ class Dataset(object):
         np.save(meta_mat_path, meta_mat)
         return meta_mat
 
-
-
-
+    # load audio features extracted from pre-trained model, e.g: musicnn
+    # merge (method to merge sequence): 'avg': average pooling, 'max': max pooling
+    def load_audio_features(self, merge='avg'):
+        audio_mat_path = self.outdir + '{}_{}_mat.npy'.format(self.audio, merge)
+        # check if there is cached matrix
+        if os.path.exists(audio_mat_path):
+            audio_mat = np.load(audio_mat_path)
+            print("Load existed audio feature matrix cache successfully!")
+            return audio_mat
+        # load audio feature matrix from audio feature folder
+        print("No audio feature cache file exists, load it from extracted features...")
+        audio_feature_root = self.dataset_root + '/' + out_folder + \
+            '/{}_features'.format(self.audio)
+        # load one matrix to get the shape
+        if not os.path.exists(audio_feature_root):
+            print("Fail to find extracted audio features: {} not exists".format(audio_feature_root))
+            return None
+        audio_feature_files = os.listdir(audio_feature_root)
+        if len(audio_feature_files) < 1:
+            print("No extracted audio feature file exists in {}".format(audio_feature_root))
+            return None
+        audio_feature_sample = np.load(audio_feature_root + '/' + audio_feature_files[0])
+        audio_feature_shape = audio_feature_sample.shape
+        if self.audio == 'musicnn':
+            audio_mat = np.zeros((len(self.song_dict), audio_feature_shape[1]))
+            unfound_track_counter = 0
+            for track_id in tqdm(self.song_dict.keys()):
+                ori_track_id = track_id
+                # convert track_id to file name
+                if not track_id.find("spotify") == -1:
+                    track_id = track_id.split(":")[2]
+                track_id += '.npy'
+                # make sure the file exists
+                if track_id in audio_feature_files:
+                    track_mat = np.load(audio_feature_root + '/' + track_id)
+                    # sequence merging
+                    if merge == 'avg':
+                        track_mat = track_mat.mean(axis=0)
+                    if merge == 'max':
+                        track_mat = track_mat.max(axis=0)
+                    # save to audio matrix
+                    audio_mat[self.song_dict[ori_track_id]][:] = track_mat
+                else:
+                    unfound_track_counter += 1
+                    print("[Audio feature]Unfound track No.{}: {}".format(unfound_track_counter, ori_track_id))
+                    continue
+        # save audio matrix to cache file
+        np.save(audio_mat_path, audio_mat)
+        return audio_mat
         
+
 
 if __name__ == '__main__':
     dataset = Dataset()

@@ -651,6 +651,7 @@ if __name__ == '__main__':
     parser.add_argument('--root', '-r', type=str, default='E:', help='Dataset root Path (the path where the dataset folder in)')
     parser.add_argument('--thres', '-t', type=str, default='2011-01-01', help='The threshold for new and old song (designed for a cold start scenario)')
     parser.add_argument('--num', '-n', type=int, default=0, help='The number of playlist you would like to collect')
+    parser.add_argument('--sub', '-s', action='store_true', help='Generate sub-dataset for debugging and testing')
 
     args = parser.parse_args()
 
@@ -660,9 +661,15 @@ if __name__ == '__main__':
 
     if args.echo:
         if args.valid:
-            valid_echo_nest(args.root, old_new_gap=args.thres, line_num=line_count)
+            if args.sub:
+                valid_echo_nest(args.root, old_new_gap=args.thres, line_num=line_count, sub=True)
+            else:
+                valid_echo_nest(args.root, old_new_gap=args.thres, line_num=line_count, sub=False)
         elif args.gen:
-            generate_dataset(args.root, old_new_gap=args.thres, line_num=line_count)
+            if args.sub:
+                generate_dataset(args.root, old_new_gap=args.thres, line_num=line_count, sub=True)
+            else:
+                generate_dataset(args.root, old_new_gap=args.thres, line_num=line_count, sub=False)
         else:
             print("You are supposed to specify the mode -v or -g, to validate and generate the dataset")
             print("Note: Rememeber to validate (-v) first, and then generate (-g)!")

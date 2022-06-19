@@ -3,6 +3,11 @@ import json
 import numpy as np
 from tqdm import tqdm
 import pickle
+import random
+
+import torch
+import torch.nn as nn
+from torch.nn.utils.rnn import pad_sequence
 
 # Path to generated dataset
 echo_nest_sub_path = 'dataset/echo_nest/sub_data/'
@@ -33,7 +38,7 @@ class Dataset(object):
     # meta [True, False]: audio features provided by Spotify
     # audio [None, 'musicnn', ...]: extracted audio features by specified method
     # lyric [None, 'tf-idf', 'doc2vec', ...]: extracted lyric features by specified method
-    def __init__(self, dataset_root='E:/dataset_old', sub=True, \
+    def __init__(self, dataset_root='E:', sub=True, \
         genre=False, meta=True, audio='musicnn', lyric=None):
         # Save params
         self.dataset_root = dataset_root
@@ -78,18 +83,140 @@ class Dataset(object):
         # load song matrix
         self.song_mat = self.get_song_mat()
         # load train and test song matrix
-        self.train_song_dict, self.train_song_matrix = \
+        self.train_song_dict, self.train_song_mat = \
             self.get_train_test_song_mat(self.train_song_json_url, set_tag='train')
-        self.test_song_dict, self.test_song_matrix = \
+        self.test_song_dict, self.test_song_mat = \
             self.get_train_test_song_mat(self.test_song_json_url, set_tag='test')
         # load training set
-        train_mat = self.load_data(self.train_folder, set_tag='train')
-        valid_mat = self.load_data(self.valid_folder, set_tag='valid')
-        test_mat = self.load_data(self.test_folder, set_tag='test')
-        if train_mat is None or valid_mat is None or test_mat is None:
+        self.train_mat = self.load_data(self.train_folder, set_tag='train')
+        self.valid_mat = self.load_data(self.valid_folder, set_tag='valid')
+        self.test_mat = self.load_data(self.test_folder, set_tag='test')
+        if self.train_mat is None or self.valid_mat is None or self.test_mat is None:
             exit(0)
+        self.x_len_max, self.y_len_max = self.get_max_seq_len()
         
-    
+
+    # Public APIs -----------------------------------------------------------------
+    # get the dimension of all embeddings
+    # Return:
+    # success: 
+    # music_dim: the dimension of the whole music embedding
+    # [genre_dim, meta_dim, audio_dim, lyric_dim]: the list of different kinds of embeddings
+    def get_dim(self):
+        genre_dim = 0
+        meta_dim = 0
+        audio_dim = 0
+        lyric_dim = 0
+        if self.genre is True:
+            genre_dim = self.genre_mat.shape[1]
+        if self.meta is True:
+            meta_dim = self.meta_mat.shape[1]
+        if self.audio is not None:
+            audio_dim = self.audio_mat.shape[1]
+        if self.lyric is not None:
+            lyric_dim = self.lyric_mat.shape[1]
+        music_dim = genre_dim + meta_dim + audio_dim + lyric_dim
+        # dimension check
+        if not music_dim == self.song_mat.shape[1]:
+            print("[Dataset Matrix Dimension] Dimension alignment failed!")
+            exit(0)
+        return music_dim, [genre_dim, meta_dim, audio_dim, lyric_dim]
+
+    # get train, valid and test data in track id list format
+    # set_tag = ['train', 'valid', 'test']
+    # Return: [x_len, y_len, x_mat, y_mat]
+    # x_len: list of song numbers in x
+    # y_len: list of song numbers in y
+    # x_mat: list of songs in x
+    # y_mat: list of songs in y
+    def get_data(self, shuffle=True, set_tag='train'):
+        if set_tag == 'train':
+            if shuffle is True:
+                random.shuffle(self.train_mat)
+            x_len = [len(data['x']) for data in self.train_mat]
+            y_len = [len(data['y']) for data in self.train_mat]
+            x_mat = [data['x'] for data in self.train_mat]
+            y_mat = [data['y'] for data in self.train_mat]
+            return x_len, y_len, x_mat, y_mat
+        elif set_tag == 'valid':
+            if shuffle is True:
+                random.shuffle(self.valid_mat)
+            x_len = [len(data['x']) for data in self.valid_mat]
+            y_len = [len(data['y']) for data in self.valid_mat]
+            x_mat = [data['x'] for data in self.valid_mat]
+            y_mat = [data['y'] for data in self.valid_mat]
+            return x_len, y_len, x_mat, y_mat
+        elif set_tag == 'test':
+            if shuffle is True:
+                random.shuffle(self.test_mat)
+            x_len = [len(data['x']) for data in self.test_mat]
+            y_len = [len(data['y']) for data in self.test_mat]
+            x_mat = [data['x'] for data in self.test_mat]
+            y_mat = [data['y'] for data in self.test_mat]
+            return [x_len, y_len, x_mat, y_mat]
+
+    # get dict and matrix, set_tag = [None (for all songs), 'train', 'test']
+    # Return:
+    # song_dict: song dictionary, where key = track id, value = index for song matrix
+    # song_mat: song matrix, contains song embeddings
+    def get_dict_mat(self, set_tag=None):
+        if set_tag is None:
+            return self.song_dict, self.song_mat
+        elif set_tag == 'train':
+            return self.train_song_dict, self.train_song_mat
+        elif set_tag == 'test':
+            return self.test_song_dict, self.test_song_mat
+        else:
+            print("[Get Dict and Mat Err]: no {} set_tag found!".format(set_tag))
+
+    # get batched train, valid, and test data in tensor format (music embedding inserted)
+    # len_mat_res: return list from get_data() method
+    # batch_size: batch size
+    # fix_length: True = all batched data are in max_length, same sequence length among batches
+    #             False = only data in one batch are in the same length, various sequence length among batches
+    def get_batched_data(self, len_mat_res, batch_size=50, fix_length=False):
+        x_len, y_len, x_mat, y_mat = len_mat_res[0], len_mat_res[1], len_mat_res[2], len_mat_res[3]
+        batch_num = int(len(x_len) / batch_size)
+        x_len_list = []
+        y_len_list = []
+        x_mat_tensor_list = []
+        y_mat_tensor_list = []
+        # convert mat to list of tensors -> [sample_num, playlist_length, music_embed_dim]
+        x_mat = [torch.tensor([self.song_mat[self.song_dict[track_id]] for track_id in x], dtype=torch.float32) for x in x_mat]
+        y_mat = [torch.tensor([self.song_mat[self.song_dict[track_id]] for track_id in y], dtype=torch.float32) for y in y_mat]
+        # iterate batches
+        for batch_idx in range(batch_num):
+            x_len_list.append(x_len[batch_idx * batch_size: (batch_idx + 1) * batch_size])
+            y_len_list.append(y_len[batch_idx * batch_size: (batch_idx + 1) * batch_size])
+            if fix_length is True:
+                # pad the first sequence to disired length
+                x_mat[batch_idx * batch_size] = nn.ConstantPad2d\
+                    ((0, 0, self.x_len_max - x_mat[batch_idx * batch_size].shape[0], 0), 0)(x_mat[batch_idx * batch_size])
+                y_mat[batch_idx * batch_size] = nn.ConstantPad2d\
+                    ((0, 0, self.y_len_max - y_mat[batch_idx * batch_size].shape[0], 0), 0)(y_mat[batch_idx * batch_size])
+            # padding
+            x_mat_padded_idx = pad_sequence(x_mat[batch_idx * batch_size: (batch_idx + 1) * batch_size], batch_first=True)
+            x_mat_tensor_list.append(x_mat_padded_idx) # [batch_size, padded_seq_len, music_embed_dim]
+            y_mat_padded_idx = pad_sequence(y_mat[batch_idx * batch_size: (batch_idx + 1) * batch_size], batch_first=True)
+            y_mat_tensor_list.append(y_mat_padded_idx) # [batch_size, padded_seq_len, music_embed_dim]
+        return x_len_list, y_len_list, x_mat_tensor_list, y_mat_tensor_list
+
+
+    # get the maximum sequence length among train, valid and test data
+    def get_max_seq_len(self):
+        x_train_len = [len(data['x']) for data in self.train_mat]
+        y_train_len = [len(data['y']) for data in self.train_mat]
+        x_valid_len = [len(data['x']) for data in self.valid_mat]
+        y_valid_len = [len(data['y']) for data in self.valid_mat]
+        x_test_len = [len(data['x']) for data in self.test_mat]
+        y_test_len = [len(data['y']) for data in self.test_mat]
+        x_len_max = max(max(x_train_len), max(x_valid_len), max(x_test_len))
+        y_len_max = max(max(y_train_len), max(y_valid_len), max(y_test_len))
+        return x_len_max, y_len_max
+        
+    # ------------------------------------------------------------------------------
+
+
     # load json file as a dictionary
     def load_json(self, json_url):
         try:
@@ -320,4 +447,10 @@ class Dataset(object):
 
 
 if __name__ == '__main__':
-    dataset = Dataset()
+    dataset = Dataset(dataset_root='E:/dataset_old')
+    print(dataset.get_dim())
+    [x_train_len, y_train_len, x_train_mat, y_train_mat] = dataset.get_data()
+    x_len_max, y_len_max = dataset.get_max_seq_len()
+    x_len_list, y_len_list, x_mat_tensor_list, y_mat_tensor_list = dataset.get_batched_data([x_train_len, y_train_len, x_train_mat, y_train_mat])
+    print(x_len_max, y_len_max)
+    print("Finished!")

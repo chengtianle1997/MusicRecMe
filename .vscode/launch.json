@@ -13,6 +13,7 @@
             "justMyCode": true,
             "args": [
                 
+                // Load dataset: datain.py ---------------------
                 // For Echo Nest
 
                 // "-e",
@@ -34,15 +35,28 @@
 
                 // For million playlist link
                 // "-m"
+                
+                // ----------------------------------------------
 
-                // Analyze database
+                // Analyze database: dataout.py ------------------
                 // Validate
-                "-e",
-                "-v"
+                // "-e",
+                // "-v"
 
                 // Generate
                 // "-e",
                 // "-g"
+
+                // -----------------------------------------------
+
+                // Train recommendation model: train.py ----------
+                "-e",
+                "-r", "E:",
+                "--sub",  // sub dataset for debugging and testing
+                "--gen",
+                "--meta",
+                "--audio", "musicnn",
+                "--lyric", "None"
 
 
             ]

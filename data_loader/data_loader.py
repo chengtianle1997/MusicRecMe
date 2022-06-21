@@ -182,8 +182,8 @@ class Dataset(object):
         x_mat_tensor_list = []
         y_mat_tensor_list = []
         # convert mat to list of tensors -> [sample_num, playlist_length, music_embed_dim]
-        x_mat = [torch.tensor([self.song_mat[self.song_dict[track_id]] for track_id in x], dtype=torch.float32) for x in x_mat]
-        y_mat = [torch.tensor([self.song_mat[self.song_dict[track_id]] for track_id in y], dtype=torch.float32) for y in y_mat]
+        x_mat = [torch.tensor(np.array([self.song_mat[self.song_dict[track_id]] for track_id in x]), dtype=torch.float32) for x in x_mat]
+        y_mat = [torch.tensor(np.array([self.song_mat[self.song_dict[track_id]] for track_id in y]), dtype=torch.float32) for y in y_mat]
         # iterate batches
         for batch_idx in range(batch_num):
             x_len_list.append(x_len[batch_idx * batch_size: (batch_idx + 1) * batch_size])
@@ -449,7 +449,7 @@ class Dataset(object):
 if __name__ == '__main__':
     dataset = Dataset(dataset_root='E:/dataset_old')
     print(dataset.get_dim())
-    [x_train_len, y_train_len, x_train_mat, y_train_mat] = dataset.get_data()
+    [x_train_len, y_train_len, x_train_mat, y_train_mat] = dataset.get_data(set_tag='train')
     x_len_max, y_len_max = dataset.get_max_seq_len()
     x_len_list, y_len_list, x_mat_tensor_list, y_mat_tensor_list = dataset.get_batched_data([x_train_len, y_train_len, x_train_mat, y_train_mat])
     print(x_len_max, y_len_max)

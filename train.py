@@ -66,13 +66,16 @@ def train(args):
     # load train and valid set
     train_data_list = dataset.get_data(set_tag='train')
     x_train_len_list, y_train_len_list, x_train_tensor_list, y_train_tensor_list = \
-        dataset.get_batched_data(train_data_list)
+        dataset.get_batched_data(train_data_list, batch_size=batch_size, fix_length=False)
     valid_data_list = dataset.get_data(set_tag='valid')
     x_valid_len_list, y_valid_len_list, x_valid_tensor_list, y_valid_tensor_list = \
-        dataset.get_batched_data(valid_data_list)
+        dataset.get_batched_data(valid_data_list, batch_size=batch_size, fix_length=False)
     train_len, valid_len = len(x_train_len_list) * batch_size, len(x_valid_len_list) * batch_size
     log.print("{} playlists found (train: {}, valid: {})".format(train_len + valid_len, train_len, valid_len))
     
+    # load model
+    model = model.UserAttention(music_embed_dim, music_embed_dim_list)
+    # 
 
 
 

@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import numpy as np
+
 import math
 
 def scaled_dot_product(q, k, v, mask=None):
@@ -16,6 +18,12 @@ def scaled_dot_product(q, k, v, mask=None):
     attention = F.softmax(attn_logits, dim=-1) # [batch_size, num_heads, seq_length, seq_length]
     values = torch.matmul(attention, v)        # [batch_size, num_heads, seq_length, head_dim]
     return values, attention
+
+def generate_mask(len_list):
+    max_len = max(len_list)
+    mask_np = np.zeros(len(len_list), max_len, max_len) # [batch_size, seq_length, seq_length]
+    mask = torch.tensor(mask_np)
+    return mask
 
 class MultiheadAttention(nn.Module):
     # Multihead Attention
@@ -58,8 +66,8 @@ class MultiheadAttention(nn.Module):
         # Determine value outputs
         values, attention = scaled_dot_product(q, k, v, mask)
         values = values.permute(0, 2, 1, 3) # [batch_size, seq_length, num_heads, head_dim]
-        values = values.reshape(batch_size, seq_length, embed_dim)
-        out = self.o_proj(values)
+        values = values.reshape(batch_size, seq_length, embed_dim) # [batch_size, seq_length, embed_dim]
+        out = self.o_proj(values) # [batch_size, seq_length, embed_dim]
 
         if return_attention:
             return o, attention
@@ -71,7 +79,7 @@ class UserAttention(nn.Module):
     '''
     The user embedding model with attention on their playlists
     '''
-    def __init__(self, music_embed_dim, music_embed_dim_list, embed_dim=128, dropout=0.1, num_heads=1, num_layer=2, re_embed=False):
+    def __init__(self, music_embed_dim, music_embed_dim_list, embed_dim=None, dropout=0.1, num_heads=1, re_embed=False):
         '''
         music_embed_dim: dimension of music embedding
         music_embed_dim_list []: list of [genre, meta, audio, lyric] dimension
@@ -83,17 +91,43 @@ class UserAttention(nn.Module):
         # re-embed audio and lyric for a smaller attention dim
         if re_embed is True:
             pass
+
+        if embed_dim is None:
+            embed_dim = music_embed_dim
         
         self.music_embed_dim = music_embed_dim
         self.num_heads = num_heads
+        self.embed_dim = embed_dim
 
         # multi-head self-attention layer
-        self.attn = MultiheadAttention(music_embed_dim, embed_dim, num_heads)
+        self.self_attn = MultiheadAttention(music_embed_dim, embed_dim, num_heads)
 
-        # multi-layer
+        # multi linear layers
+        pass
+
+        # normalize and dropout layer
+        self.attn_out_norm =nn.LayerNorm(embed_dim)
+        self.dropout = nn.Dropout(dropout)
     
-    def forward(self, x):
+    def forward(self, x, mask=None):
+        # input x: [batch_size, seq_length, music_embed_dim]
+        # mask: [batch_size, seq_length, seq_length]
+
+        # convert mask
+        if mask is not None:
+            mask = mask.reshape(mask.shape[0], 1, mask.shape[1], mask.shape[2]) # [batch_size, 1, seq_length, seq_length]
+            mask = mask.repeat(1, self.num_heads, 1, 1) # [batch_size, num_heads, seq_length, seq_length]
         
         # attention
+        attn_out, attn_weights = self.self_attn(x, mask=mask) # [batch_size, seq_length, embed_dim]
+        # residual connection
+        x = x + self.dropout(attn_out)
+        x = self.attn_out_norm(x) # [batch_size, seq_length, embed_dim]
+        # sum among sequence
+        x = x.sum(dim=1) # batch_size, embed_dim
 
+        # linear layers
+        pass
+        
+        return x
 

@@ -21,9 +21,103 @@ def scaled_dot_product(q, k, v, mask=None):
 
 def generate_mask(len_list):
     max_len = max(len_list)
-    mask_np = np.zeros(len(len_list), max_len, max_len) # [batch_size, seq_length, seq_length]
+    mask_np = np.zeros((len(len_list), max_len, max_len)) # [batch_size, seq_length, seq_length]
+    # mark valid positions
+    for i in range(len(len_list)):
+        mask_np[i, 0: len_list[i], 0: len_list[i]] = 1
     mask = torch.tensor(mask_np)
     return mask
+
+def generate_out_mask(len_list):
+    max_len = max(len_list)
+    mask_np = np.zeros((len(len_list), max_len, 1))
+    # mark valid positions
+    for i in range(len(len_list)):
+        mask_np[i, 0: len_list[i], 0] = 1
+    mask = torch.tensor(mask_np)
+    return mask
+
+# input:
+# y_mask = [batch_size, seq_length, 1]
+def get_rmse_loss(mse_loss, pred, y, y_mask):
+    pred = pred.reshape(pred.shape[0], 1, pred.shape[1]) # [batch_size, 1, embed_dim]
+    pred = pred.repeat(1, y.shape[1], 1) # [batch_size, max_seq_len, embed_dim]
+    y_mask = y_mask.repeat(1, 1, pred.shape[2])
+    loss = mse_loss(pred, y)
+    loss = (loss * y_mask).sum()
+    valid_elements = y_mask.sum()
+    loss = torch.sqrt(loss / valid_elements)
+    return loss
+
+class MusicRecommender(object):
+    '''
+    Recommend songs according to song dictionary and user embedding
+    '''
+    def __init__(self, dataset, device, mode='train'):
+        self.device = device
+        if mode == 'train':
+            self.song_dict = dataset.train_song_dict
+            self.song_mat = torch.tensor(dataset.train_song_mat).to(device)
+        elif mode == 'test':
+            self.song_dict = dataset.test_song_dict
+            self.song_mat = torch.tensor(dataset.test_song_mat).to(device)
+        # reshape: song_mat = [song_num, song_embed_dim, 1]
+        # self.song_mat = self.song_mat.reshape(self.song_mat.shape[0], self.song_mat.shape[1], 1)
+        self.cos_sim = nn.CosineSimilarity(dim=1)
+        # reverse song dict to find track by index
+        self.rev_song_dict = {v: k for k, v in self.song_dict.items()}
+        # mse loss
+        mse_loss = nn.MSELoss()
+    
+    # recommend songs according to cosine similarity (for multi-users at once)
+    # user_embed[]: user embedding from UserAttention model [batch_size, user_embed_dim]
+    # x_valid_tracks []: given track ids in x (not embeddings) [batch_size, seq_len]
+    # y_valid_tracks []: ground truth track ids (not embeddings) [batch_size, seq_len]
+    # return_songs: whether return recommended track ids or not
+    # top_k: return top K recommended songs
+    def recommend(self, user_embed, x_valid_tracks, y_valid_tracks, return_songs=False, top_k=100):
+        top_10_recall_num = 0
+        top_50_recall_num = 0
+        top_100_recall_num = 0
+        ground_truth_num = 0
+        top_10_track_list = []
+        # iterate through users
+        for i in range(user_embed.shape[0]):
+            # similarity = [song_num]
+            similarity = self.cos_sim(self.song_mat, user_embed[i, :].reshape(1, user_embed.shape[1]))
+            # mask out songs in x
+            index_mask = torch.ones(similarity.shape[0]).to(self.device)
+            for track in x_valid_tracks[i]:
+                index_mask[self.song_dict[track]] = -1
+            similarity = similarity * index_mask
+            # top_k_index = [top_k]
+            top_k_index = torch.topk(similarity.flatten(), top_k).indices
+            # get track embedding
+            top_k_embed = [self.song_mat[int(i)] for i in top_k_index]
+            # get track ids
+            top_k_track = [self.rev_song_dict[int(i)] for i in top_k_index]
+            top_10_track_list.append(top_k_track)
+            # get intersection of predicted track and groud truth tracks
+            gt_set = set(y_valid_tracks[i])
+            # top 10, 50, 100 recall
+            top_10_inter = set(top_k_track[0:10]) & gt_set
+            top_50_inter = set(top_k_track[0:50]) & gt_set
+            top_100_inter = set(top_k_track[0:100]) & gt_set
+            top_10_recall_num += len(top_10_inter)
+            top_50_recall_num += len(top_50_inter)
+            top_100_recall_num += len(top_100_inter)
+            ground_truth_num += len(gt_set)
+        
+        recalls = [top_10_recall_num / ground_truth_num, top_50_recall_num / ground_truth_num, \
+            top_100_recall_num / ground_truth_num]
+        if return_songs is True:
+            return top_10_track_list, recalls
+        else:
+            # calculate recall rate
+            return recalls
+
+        
+
 
 class MultiheadAttention(nn.Module):
     # Multihead Attention
@@ -41,7 +135,7 @@ class MultiheadAttention(nn.Module):
         self.head_dim = embed_dim // num_heads
 
         # Stock all weights matrices together for efficiency
-        self.qkv_proj = nn.Linear(input_dim, embed_dim)
+        self.qkv_proj = nn.Linear(input_dim, embed_dim*3)
         self.o_proj = nn.Linear(embed_dim, embed_dim)
 
         # reset all params
@@ -70,11 +164,11 @@ class MultiheadAttention(nn.Module):
         out = self.o_proj(values) # [batch_size, seq_length, embed_dim]
 
         if return_attention:
-            return o, attention
+            return out, attention
         else:
-            return o
+            return out
 
-
+# Attention on playlists to generate user embeddings
 class UserAttention(nn.Module):
     '''
     The user embedding model with attention on their playlists
@@ -124,7 +218,7 @@ class UserAttention(nn.Module):
         x = x + self.dropout(attn_out)
         x = self.attn_out_norm(x) # [batch_size, seq_length, embed_dim]
         # sum among sequence
-        x = x.sum(dim=1) # batch_size, embed_dim
+        x = x.mean(dim=1) # [batch_size, embed_dim]
 
         # linear layers
         pass

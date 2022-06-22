@@ -56,7 +56,9 @@
                 "--gen",
                 "--meta",
                 "--audio", "musicnn",
-                "--lyric", "None"
+                "--lyric", "None",
+                "--lr", "1e-3",
+                "-b", "50"
 
 
             ]

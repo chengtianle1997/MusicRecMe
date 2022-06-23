@@ -39,7 +39,7 @@ class Dataset(object):
     # audio [None, 'musicnn', ...]: extracted audio features by specified method
     # lyric [None, 'tf-idf', 'doc2vec', ...]: extracted lyric features by specified method
     def __init__(self, dataset_root='E:', sub=True, \
-        genre=False, meta=True, audio='musicnn', lyric=None):
+        genre=False, meta=True, audio='musicnn', lyric=None, outdir=None):
         # Save params
         self.dataset_root = dataset_root
         self.sub = sub
@@ -49,15 +49,19 @@ class Dataset(object):
         self.lyric = lyric
         # get paths
         if sub is True:
-            self.outdir = self.dataset_root + '/' + echo_nest_sub_path
+            self.indir = self.dataset_root + '/' + echo_nest_sub_path
         else:
-            self.outdir = self.dataset_root + '/' + echo_nest_whole_path
-        self.train_song_json_url = self.outdir + 'train_song.json'
-        self.test_song_json_url = self.outdir + 'test_song.json'
-        self.song_json_url = self.outdir + 'song.json'
-        self.train_folder = self.outdir + 'train'
-        self.valid_folder = self.outdir + 'valid'
-        self.test_folder = self.outdir + 'test'
+            self.indir = self.dataset_root + '/' + echo_nest_whole_path
+        if outdir is not None:
+            self.outdir = outdir + '/'
+        else:
+            self.outdir = self.indir
+        self.train_song_json_url = self.indir + 'train_song.json'
+        self.test_song_json_url = self.indir + 'test_song.json'
+        self.song_json_url = self.indir + 'song.json'
+        self.train_folder = self.indir + 'train'
+        self.valid_folder = self.indir + 'valid'
+        self.test_folder = self.indir + 'test'
         # load song json
         self.song_json = self.load_json(self.song_json_url)
         if self.song_json is None:

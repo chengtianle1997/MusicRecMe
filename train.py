@@ -22,10 +22,11 @@ import numpy as np
 batch_size = 50
 learning_rate = 1e-3
 early_stop_steps = 50 # early stopping triggered if over early_stop_steps no update
-loss_type = 'seq_cos' # 'cos' or 'rmse' or 'seq_cos'
+loss_type = 'rmse' # 'cos' or 'rmse' or 'seq_cos'
 loss_type_list = ['rmse', 'cos', 'seq_cos']
-seq_k = 10
+seq_k = 1
 use_music_embedding = False
+include_x_loss = True
 
 echo_nest_sub_path = 'dataset/echo_nest/sub_data'
 echo_nest_whole_path = 'dataset/echo_nest/data'
@@ -167,6 +168,10 @@ def train(args):
     work_folder = work_folder_root + '/' + task_name
     if not os.path.exists(work_folder):
         os.makedirs(work_folder)
+    # create cache folder
+    cache_folder = work_folder + '/cache'
+    if not os.path.exists(cache_folder):
+        os.makedirs(cache_folder)
     
     # init logger
     time_stamp = datetime.datetime.now()
@@ -175,7 +180,7 @@ def train(args):
     
     # load training data
     dataset = data_loader.Dataset(dataset_root='E:', sub=args.sub, genre=args.gen, meta=args.meta, \
-        audio=args.audio, lyric=args.lyric)
+        audio=args.audio, lyric=args.lyric, outdir=cache_folder)
     music_embed_dim, music_embed_dim_list = dataset.get_dim()
     log.print("dataset loaded:")
     log.print("music embed dim: {} [{}, {}, {}, {}]".format(music_embed_dim, music_embed_dim_list[0], \
@@ -268,16 +273,20 @@ def train(args):
             x_mask = Model.generate_mask(x_len).to(device)
             # generate mask for y to calculate loss
             y_mask = Model.generate_out_mask(y_len).to(device)
+            x_y_mask = Model.generate_out_mask(x_len).to(device)
             # forward, pred is user embedding
             model.train()
             pred = model(x, x_mask)
             # calculate loss
             if loss_type == 'rmse':
-                loss = Model.get_rmse_loss(mse_loss, pred, y, y_mask, model=model if use_music_embedding else None)
+                loss = Model.get_rmse_loss(mse_loss, pred, y, y_mask, model=model if use_music_embedding else None, \
+                    x=x if include_x_loss else None, x_mask=x_y_mask if include_x_loss else None)
             elif loss_type == 'cos':
-                loss = Model.get_cosine_sim_loss(cos_sim_loss, pred, y, y_mask, model=model if use_music_embedding else None)
+                loss = Model.get_cosine_sim_loss(cos_sim_loss, pred, y, y_mask, model=model if use_music_embedding else None, \
+                    x=x if include_x_loss else None, x_mask=x_y_mask if include_x_loss else None)
             elif loss_type == 'seq_cos':
-                loss = seq_cos_loss(pred, y, y_mask, model=model if use_music_embedding else None)
+                loss = seq_cos_loss(pred, y, y_mask, model=model if use_music_embedding else None, \
+                    x=x if include_x_loss else None, x_mask=x_y_mask if include_x_loss else None)
             # back propagation
             loss.backward()
             optimizer.step()
@@ -293,16 +302,20 @@ def train(args):
         x_valid_mask = Model.generate_mask(x_valid_len).to(device)
         # generate mask for y to calculate loss
         y_valid_mask = Model.generate_out_mask(y_valid_len).to(device)
+        x_y_valid_mask = Model.generate_out_mask(x_valid_len).to(device)
         # prediction
         model.eval()
         pred_valid = model(x_valid, x_valid_mask) 
         # calculate valid loss
         if loss_type == 'rmse':
-            valid_loss = Model.get_rmse_loss(mse_loss, pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None)
+            valid_loss = Model.get_rmse_loss(mse_loss, pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None, \
+                x=x_valid if include_x_loss else None, x_mask=x_y_valid_mask if include_x_loss else None)
         elif loss_type == 'cos':
-            valid_loss = Model.get_cosine_sim_loss(cos_sim_loss, pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None)
+            valid_loss = Model.get_cosine_sim_loss(cos_sim_loss, pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None, \
+                x=x_valid if include_x_loss else None, x_mask=x_y_valid_mask if include_x_loss else None)
         elif loss_type == 'seq_cos':
-            valid_loss = seq_cos_loss(pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None)
+            valid_loss = seq_cos_loss(pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None, \
+                    x=x_valid if include_x_loss else None, x_mask=x_y_valid_mask if include_x_loss else None)
         train_loss_epoch.append(train_loss_batch[-1])
         valid_loss_epoch.append(valid_loss.item())
         

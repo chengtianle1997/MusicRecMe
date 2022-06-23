@@ -39,7 +39,11 @@ def generate_out_mask(len_list):
 
 # input:
 # y_mask = [batch_size, seq_length, 1]
-def get_rmse_loss(mse_loss, pred, y, y_mask, model=None):
+def get_rmse_loss(mse_loss, pred, y, y_mask, model=None, x=None, x_mask=None):
+    # include x
+    if x is not None and x_mask is not None:
+        y = torch.cat([y, x], dim=1)
+        y_mask = torch.cat([y_mask, x_mask], dim=1)
     if model is not None:
         # music embedding
         y = model.module.music_embed(y)
@@ -54,7 +58,11 @@ def get_rmse_loss(mse_loss, pred, y, y_mask, model=None):
 
 # input:
 # y_mask = [batch_size, seq_length, 1]
-def get_cosine_sim_loss(cos_sim_loss, pred, y, y_mask, model=None):
+def get_cosine_sim_loss(cos_sim_loss, pred, y, y_mask, model=None, x=None, x_mask=None):
+    # include x
+    if x is not None and x_mask is not None:
+        y = torch.cat([y, x], dim=1)
+        y_mask = torch.cat([y_mask, x_mask], dim=1)
     if model is not None:
         # music embedding
         y = model.module.music_embed(y)
@@ -148,7 +156,14 @@ class SequenceEmbedLoss(nn.Module):
     # pred = [batch_size, seq_x_length, embed_dim]
     # y = [batch_size, seq_y_length, embed_dim]
     # y_mask = [batch_size, seq_y_length, 1]
-    def forward(self, pred, y, y_mask, model=None):
+    # x = [batch_size, seq_length, embed_dim]
+    # x_mask = [batch_size, seq_length, 1]
+    # reduction = 'mean', 'max'
+    def forward(self, pred, y, y_mask, model=None, x=None, x_mask=None, reduction='max'):
+        # include x
+        if x is not None and x_mask is not None:
+            y = torch.cat([y, x], dim=1)
+            y_mask = torch.cat([y_mask, x_mask], dim=1)
         # music embedding
         if model is not None:
             y = model.module.music_embed(y)
@@ -157,12 +172,15 @@ class SequenceEmbedLoss(nn.Module):
         pred = pred.reshape(batch_size, seq_x_len, 1, embed_dim)
         y = y.reshape(batch_size, 1, seq_y_len, embed_dim)
         similarity = self.cos_sim(pred, y) # [batch_size, x_len, y_len]
-        similarity = torch.max(similarity, dim=1)[0] # [batch_size, y_len]
+        if reduction == 'max':
+            similarity = torch.max(similarity, dim=1)[0] # [batch_size, y_len]
+        elif reduction == 'mean':
+            similarity = similarity.mean(dim=1)
         loss = 1. - similarity
         y_mask = y_mask.reshape(batch_size, seq_y_len)
         valid_num = y_mask.sum()
         loss = (loss * y_mask).sum() / valid_num
-        return loss
+        return torch.sqrt(loss)
 
 class MusicRecommenderSequenceEmbed(object):
     '''
@@ -354,18 +372,25 @@ class UserAttention(nn.Module):
         # attention
         attn_out, attn_weights = self.self_attn(x, mask=mask) # [batch_size, seq_length, embed_dim]
         # residual connection
+        attn_out = torch.tanh(attn_out)
+        attn_out = self.attn_out_norm(attn_out) # [batch_size, seq_length, embed_dim]
         x = x + self.dropout(attn_out)
-        x = self.attn_out_norm(x) # [batch_size, seq_length, embed_dim]
 
         # return sequence embedding by PCA
         if self.return_seq is True:
             U, S, V = torch.pca_lowrank(x, q=self.seq_k)
             # return the seq_k main directions
-            x = V.transpose(1, 2)
-            return x
+            # x = V.transpose(1, 2)
+            # x = torch.matmul(U.transpose(1, 2), x)
+            return x[:, 0: self.seq_k, :].view(x.shape[0], self.seq_k, -1)
 
         # sum among sequence
-        x = x.mean(dim=1) # [batch_size, embed_dim]
+        mask_ = mask[:, 0, :, 0].to(torch.float32)
+        mask_x = mask_.view(x.shape[0], x.shape[1], 1).repeat(1, 1, x.shape[2])
+        x = x * mask_x
+        x = x.sum(dim=1) # [batch_size, embed_dim]
+        mask_ = mask_.sum(dim=-1).view(x.shape[0], 1).repeat(1, x.shape[1]) # [batch_size, 1]
+        x = x / mask_
 
         # linear layers
         pass
@@ -428,6 +453,7 @@ class MusicEmbedding(nn.Module):
         if self.genre_in > 0 and self.genre_out > 0:
             # genre_embed = [batch, genre_out]
             genre_embed = self.genre_embed(genre_part)
+            genre_embed = torch.tanh(genre_embed)
             out_embed = torch.cat([out_embed, genre_embed], dim=-1)
         elif self.genre_in > 0:
             genre_embed = genre_part
@@ -435,6 +461,7 @@ class MusicEmbedding(nn.Module):
 
         if self.meta_in > 0 and self.meta_out > 0:
             meta_embed = self.meta_embed(meta_part)
+            meta_embed = torch.tanh(meta_embed)
             out_embed = torch.cat([out_embed, meta_embed], dim=-1)
         elif self.meta_in > 0:
             meta_embed = meta_part
@@ -442,6 +469,7 @@ class MusicEmbedding(nn.Module):
         
         if self.audio_in > 0 and self.audio_out > 0:
             audio_embed = self.audio_embed(audio_part)
+            audio_embed = torch.tanh(audio_embed)
             out_embed = torch.cat([out_embed, audio_embed], dim=-1)
         elif self.audio_in > 0:
             audio_embed = audio_part
@@ -449,6 +477,7 @@ class MusicEmbedding(nn.Module):
         
         if self.lyric_in > 0 and self.lyric_out > 0:
             lyric_embed = self.lyric_embed(lyric_part)
+            lyric_embed = torch.tanh(lyric_embed)
             out_embed = torch.cat([out_embed, lyric_embed], dim=-1)
         elif self.lyric_in > 0:
             lyric_embed = lyric_part

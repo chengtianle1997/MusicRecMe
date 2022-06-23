@@ -22,6 +22,10 @@ import numpy as np
 batch_size = 50
 learning_rate = 1e-3
 early_stop_steps = 50 # early stopping triggered if over early_stop_steps no update
+loss_type = 'rmse' # 'cos' or 'rmse' or 'seq_cos'
+loss_type_list = ['rmse', 'cos', 'seq_cos']
+seq_k = 10
+use_music_embedding = True
 
 echo_nest_sub_path = 'dataset/echo_nest/sub_data'
 echo_nest_whole_path = 'dataset/echo_nest/data'
@@ -53,6 +57,7 @@ def get_sub_task_name(args):
 def get_time_string(time):
     return time.strftime("%Y_%m_%d_%H_%M_%S")
 
+# move optimizer to cuda (gpu)
 def optimizer_to(optim, device):
     # move optimizer to device
     for param in optim.state.values():
@@ -76,13 +81,13 @@ def update_visualizer(vis, opts):
         X=np.array([i for i in range(len(train_loss_batch))]) / batch_size,
         Y=train_loss_batch,
         win='train_loss_batch',
-        name='Train loss (RMSE)',
+        name='Train',
         update=None,
         opts={
             'showlegend': True,
             'title': "Training loss among batches",
             'x_label': 'Epoch',
-            'y_label': 'RMSE Loss'
+            'y_label': 'Loss'
         }
     )
     # draw the train and valid loss plot among epochs
@@ -90,20 +95,20 @@ def update_visualizer(vis, opts):
         X=[i for i in range(len(train_loss_epoch))],
         Y=train_loss_epoch,
         win='train_valid_loss',
-        name='Train loss (RMSE)',
+        name='Train',
         update=None,
         opts={
             'showlegend': True,
             'title': "Training and Validation loss",
             'x_label': 'Epoch',
-            'y_label': 'RMSE Loss'
+            'y_label': 'Loss'
         }
     )
     vis.line(
         X=[i for i in range(len(train_loss_epoch))],
         Y=valid_loss_epoch,
         win='train_valid_loss',
-        name='Valid loss (RMSE)',
+        name='Valid',
         update='append',
     )
     # draw recall lines
@@ -183,10 +188,17 @@ def train(args):
     x_valid_tracks = valid_data_list[2]
     y_valid_tracks = valid_data_list[3]
     
+    # check loss type
+    if loss_type not in loss_type_list:
+        log.print("Cannot support loss function type: {}".format(loss_type))
+        exit
     # load model
-    model = Model.UserAttention(music_embed_dim, music_embed_dim_list)
+    model = Model.UserAttention(music_embed_dim, music_embed_dim_list, \
+        return_seq=True if loss_type=='seq_cos' else False, seq_k=seq_k, re_embed=use_music_embedding)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     mse_loss = nn.MSELoss(reduction='none') # do not calculate mean or sum
+    cos_sim_loss = nn.CosineSimilarity(dim=2) # cosine similarity on embedding dimension
+    seq_cos_loss = Model.SequenceEmbedLoss()
     start_epoch = 0
     best_epoch = 0
     best_valid_loss = float('inf')
@@ -211,7 +223,12 @@ def train(args):
     optimizer_to(optimizer, device)
 
     # load recommender
-    recommender = Model.MusicRecommender(dataset, device, mode='train')
+    if loss_type == 'seq_cos':
+        recommender = Model.MusicRecommenderSequenceEmbed(dataset, device, mode='train', \
+            model=model, use_music_embedding=use_music_embedding)
+    else:
+        recommender = Model.MusicRecommender(dataset, device, mode='train', model=model, \
+            use_music_embedding=use_music_embedding)
 
     # loss recorder
     train_loss_batch = []
@@ -227,7 +244,7 @@ def train(args):
             valid_loss_epoch = recorders['valid_loss_epoch']
             recall_epoch = recorders['recall_epoch']
     
-    # start training
+    # start training --------------------------------------------------------------------------
     for epoch in range(start_epoch, args.epoch):
         # iterate through batch
         for i, data in enumerate(x_train_tensor_list):
@@ -246,12 +263,18 @@ def train(args):
             model.train()
             pred = model(x, x_mask)
             # calculate loss
-            loss = Model.get_rmse_loss(mse_loss, pred, y, y_mask)
+            if loss_type == 'rmse':
+                loss = Model.get_rmse_loss(mse_loss, pred, y, y_mask, model=model if use_music_embedding else None)
+            elif loss_type == 'cos':
+                loss = Model.get_cosine_sim_loss(cos_sim_loss, pred, y, y_mask, model=model if use_music_embedding else None)
+            elif loss_type == 'seq_cos':
+                loss = seq_cos_loss(pred, y, y_mask, model=model if use_music_embedding else None)
             # back propagation
             loss.backward()
             optimizer.step()
             train_loss_batch.append(loss.item())
             # log.print("Epoch: {}, Batch: {}, train loss: {}".format(epoch, i, loss.item()))
+        
         # valid 
         x_valid = x_valid_tensor_list[0].to(device)
         x_valid_len = x_valid_len_list[0]
@@ -265,17 +288,25 @@ def train(args):
         model.eval()
         pred_valid = model(x_valid, x_valid_mask) 
         # calculate valid loss
-        valid_loss = Model.get_rmse_loss(mse_loss, pred_valid, y_valid, y_valid_mask)
+        if loss_type == 'rmse':
+            valid_loss = Model.get_rmse_loss(mse_loss, pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None)
+        elif loss_type == 'cos':
+            valid_loss = Model.get_cosine_sim_loss(cos_sim_loss, pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None)
+        elif loss_type == 'seq_cos':
+            valid_loss = seq_cos_loss(pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None)
         train_loss_epoch.append(train_loss_batch[-1])
         valid_loss_epoch.append(valid_loss.item())
+        
         # recommendation
         recalls = recommender.recommend(pred_valid, x_valid_tracks, y_valid_tracks, return_songs=False)
         recall_epoch.append(recalls)
         log.print("[Epoch: {}] train loss: {}, valid loss: {}, recalls: (@10: {}, @50: {}, @100: {})"\
             .format(epoch, train_loss_batch[-1], valid_loss, recalls[0], recalls[1], recalls[2]))
+        
         # update visualizer
         opts = [batch_size, train_loss_batch, train_loss_epoch, valid_loss_epoch, recall_epoch]
         update_visualizer(vis, opts)
+        
         # check if it is a better model
         if valid_loss < best_valid_loss or recalls[1] > best_recall_50:
             # save the model
@@ -290,10 +321,12 @@ def train(args):
             best_valid_loss = valid_loss
             best_recall_50 = recalls[1]
             best_epoch = epoch
+        
         # early stopping
         if epoch - best_epoch > early_stop_steps:
             log.print("Early Stopping: No valid loss update after {} steps".format(early_stop_steps))
             break
+        
         # save the training process
         if epoch % 5 == 0:
             with open(train_process_recorder_path, 'wb') as f:
@@ -322,7 +355,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch', '-b', type=int, default=50, help='Batch size')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning Rate')
     parser.add_argument('--head', type=int, default=1, help='Number of heads in Multi-head self-attention')
-    parser.add_argument('--epoch', type=int, default=1000, help='Number of epochs in training process')
+    parser.add_argument('--epoch', type=int, default=500, help='Number of epochs in training process')
 
     args = parser.parse_args()
 

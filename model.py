@@ -202,6 +202,8 @@ class MusicRecommenderSequenceEmbed(object):
         top_100_recall_num = 0
         ground_truth_num = 0
         top_10_track_list = []
+        # top_10_track_mat = [batch_size, 10, embed_dim]
+        top_10_track_mat = torch.zeros((batch_size, 10, self.song_mat.shape[1])).to(self.device)
         # iterate through users
         for i in range(batch_size):
             # iterate through user embeddings
@@ -223,6 +225,9 @@ class MusicRecommenderSequenceEmbed(object):
             # get track ids
             top_k_track = [self.rev_song_dict[int(i)] for i in top_k_index]
             top_10_track_list.append(top_k_track)
+            top_10_track_list.append(top_k_track)
+            for n in range(10):
+                top_10_track_mat[i, n, :] = self.song_mat[int(top_k_index[n])]
             # get intersection of predicted track and groud truth tracks
             gt_set = set(y_valid_tracks[i])
             # top 10, 50, 100 recall
@@ -237,7 +242,7 @@ class MusicRecommenderSequenceEmbed(object):
         recalls = [top_10_recall_num / ground_truth_num, top_50_recall_num / ground_truth_num, \
             top_100_recall_num / ground_truth_num]
         if return_songs is True:
-            return top_10_track_list, recalls
+            return top_10_track_list, top_10_track_mat, recalls
         else:
             # calculate recall rate
             return recalls

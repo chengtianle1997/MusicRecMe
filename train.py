@@ -25,7 +25,7 @@ early_stop_steps = 50 # early stopping triggered if over early_stop_steps no upd
 loss_type = 'rmse' # 'cos' or 'rmse' or 'seq_cos'
 loss_type_list = ['rmse', 'cos', 'seq_cos']
 seq_k = 10
-use_music_embedding = True
+use_music_embedding = False
 
 echo_nest_sub_path = 'dataset/echo_nest/sub_data'
 echo_nest_whole_path = 'dataset/echo_nest/data'
@@ -74,8 +74,8 @@ def optimizer_to(optim, device):
                         subparam._grad.data = subparam._grad.data.to(device)
 
 def update_visualizer(vis, opts):
-    batch_size, train_loss_batch, train_loss_epoch, valid_loss_epoch, recall_epoch \
-        = opts[0], opts[1], opts[2], opts[3], opts[4]
+    batch_size, train_loss_batch, train_loss_epoch, valid_loss_epoch, recall_epoch, top_track_loss \
+        = opts[0], opts[1], opts[2], opts[3], opts[4], opts[5]
     # draw the train loss plot among batches
     vis.line(
         X=np.array([i for i in range(len(train_loss_batch))]) / batch_size,
@@ -109,6 +109,13 @@ def update_visualizer(vis, opts):
         Y=valid_loss_epoch,
         win='train_valid_loss',
         name='Valid',
+        update='append',
+    )
+    vis.line(
+        X=[i for i in range(len(top_track_loss))],
+        Y=top_track_loss,
+        win='train_valid_loss',
+        name='Recom',
         update='append',
     )
     # draw recall lines
@@ -235,6 +242,7 @@ def train(args):
     train_loss_epoch = []
     valid_loss_epoch = []
     recall_epoch = []
+    top_track_loss_epoch = []
     train_process_recorder_path = work_folder + '/' + sub_task_name + '.pkl'
     if os.path.exists(train_process_recorder_path):
         with open(train_process_recorder_path, 'rb') as f:
@@ -243,6 +251,7 @@ def train(args):
             train_loss_epoch = recorders['train_loss_epoch']
             valid_loss_epoch = recorders['valid_loss_epoch']
             recall_epoch = recorders['recall_epoch']
+            top_track_loss_epoch = recorders['top_track_loss']
     
     # start training --------------------------------------------------------------------------
     for epoch in range(start_epoch, args.epoch):
@@ -298,13 +307,24 @@ def train(args):
         valid_loss_epoch.append(valid_loss.item())
         
         # recommendation
-        recalls = recommender.recommend(pred_valid, x_valid_tracks, y_valid_tracks, return_songs=False)
+        top_10_track_ids, top_10_track_mats, recalls = recommender.recommend(pred_valid, x_valid_tracks, y_valid_tracks, return_songs=True)
         recall_epoch.append(recalls)
+        # calculate loss for recommended tracks
+        if loss_type == 'rmse':
+            top_track_loss = Model.get_rmse_loss(mse_loss, top_10_track_mats[:, 0, :], \
+                y_valid, y_valid_mask, model=model if use_music_embedding else None)
+        elif loss_type == 'cos':
+            top_track_loss = Model.get_cosine_sim_loss(cos_sim_loss, top_10_track_mats[:, 0, :], \
+                y_valid, y_valid_mask, model=model if use_music_embedding else None)
+        elif loss_type == 'seq_cos':
+            top_track_loss = seq_cos_loss(top_10_track_mats, y_valid, y_valid_mask, \
+                model=model if use_music_embedding else None)
+        top_track_loss_epoch.append(top_track_loss.item())
         log.print("[Epoch: {}] train loss: {}, valid loss: {}, recalls: (@10: {}, @50: {}, @100: {})"\
             .format(epoch, train_loss_batch[-1], valid_loss, recalls[0], recalls[1], recalls[2]))
         
         # update visualizer
-        opts = [batch_size, train_loss_batch, train_loss_epoch, valid_loss_epoch, recall_epoch]
+        opts = [batch_size, train_loss_batch, train_loss_epoch, valid_loss_epoch, recall_epoch, top_track_loss_epoch]
         update_visualizer(vis, opts)
         
         # check if it is a better model
@@ -322,6 +342,8 @@ def train(args):
             best_recall_50 = recalls[1]
             best_epoch = epoch
         
+        log.print("Best Epoch: {}, valid loss: {}, best recall@50: {}".format(best_epoch, best_valid_loss, best_recall_50))
+
         # early stopping
         if epoch - best_epoch > early_stop_steps:
             log.print("Early Stopping: No valid loss update after {} steps".format(early_stop_steps))
@@ -334,7 +356,8 @@ def train(args):
                     'train_loss_batch': train_loss_batch,
                     'train_loss_epoch': train_loss_epoch,
                     'valid_loss_epoch': valid_loss_epoch,
-                    'recall_epoch': recall_epoch
+                    'recall_epoch': recall_epoch,
+                    'top_track_loss': top_track_loss_epoch
                 }, f)
 
 

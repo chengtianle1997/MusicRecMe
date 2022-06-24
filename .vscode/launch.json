@@ -55,7 +55,7 @@
                 "--sub",  // sub dataset for debugging and testing
                 "--gen",
                 "--meta",
-                "--audio", "None",
+                "--audio", "musicnn",
                 "--lyric", "None",
                 "--lr", "1e-3",
                 "-b", "50"

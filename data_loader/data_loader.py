@@ -39,7 +39,8 @@ class Dataset(object):
     # audio [None, 'musicnn', ...]: extracted audio features by specified method
     # lyric [None, 'tf-idf', 'doc2vec', ...]: extracted lyric features by specified method
     def __init__(self, dataset_root='E:', sub=True, \
-        genre=False, meta=True, audio='musicnn', lyric=None, outdir=None):
+        genre=False, meta=True, audio='musicnn', lyric=None, outdir=None, dim_clip='pca',\
+        dim_list=[64, 0, 128, 128]):
         # Save params
         self.dataset_root = dataset_root
         self.sub = sub
@@ -47,6 +48,8 @@ class Dataset(object):
         self.meta = meta
         self.audio = audio
         self.lyric = lyric
+        self.dim_clip = dim_clip
+        self.dim_list = dim_list
         # get paths
         if sub is True:
             self.indir = self.dataset_root + '/' + echo_nest_sub_path
@@ -113,12 +116,20 @@ class Dataset(object):
         lyric_dim = 0
         if self.genre is True:
             genre_dim = self.genre_mat.shape[1]
+            if self.dim_list[0] > 0:
+                genre_dim = self.dim_list[0]
         if self.meta is True:
             meta_dim = self.meta_mat.shape[1]
+            if self.dim_list[1] > 0:
+                meta_dim = self.dim_list[1]
         if self.audio is not None:
             audio_dim = self.audio_mat.shape[1]
+            if self.dim_list[2] > 0:
+                audio_dim = self.dim_list[2]
         if self.lyric is not None:
             lyric_dim = self.lyric_mat.shape[1]
+            if self.dim_list[3] > 0:
+                lyric_dim = self.dim_list[3]
         music_dim = genre_dim + meta_dim + audio_dim + lyric_dim
         # dimension check
         if not music_dim == self.song_mat.shape[1]:
@@ -267,6 +278,8 @@ class Dataset(object):
 
     # get song matrix from: song dictionary, genre matrix, meta matrix, 
     #                       audio matrix and lyric matrix
+    # dim_clip = 'pca'
+    # dim_list = [genre_dim, meta_dim, audio_dim, lyric_dim]meta_audio_ 
     def get_song_mat(self):
         song_mat_path = self.outdir + 'song_mat.npy'
         # check if there is song matrix cache exists
@@ -279,12 +292,28 @@ class Dataset(object):
         # add an empty column at the beginning
         song_mat = np.zeros((len(self.song_dict), 1))
         if self.genre is True:
+            # pca
+            if self.dim_list[0] > 0:
+                U, S, V = torch.pca_lowrank(torch.tensor(self.genre_mat), q=self.dim_list[0])
+                self.genre_mat = torch.matmul(torch.tensor(self.genre_mat), V[:, :self.dim_list[0]]).numpy()
             song_mat = np.hstack([song_mat, self.genre_mat])
         if self.meta is True:
+            # pca
+            if self.dim_list[1] > 0:
+                U, S, V = torch.pca_lowrank(torch.tensor(self.meta_mat), q=self.dim_list[1])
+                self.meta_mat = torch.matmul(torch.tensor(self.meta_mat), V[:, :self.dim_list[1]]).numpy()
             song_mat = np.hstack([song_mat, self.meta_mat])
         if self.audio is not None:
+            # pca
+            if self.dim_list[2] > 0:
+                U, S, V = torch.pca_lowrank(torch.tensor(self.audio_mat), q=self.dim_list[2])
+                self.audio_mat = torch.matmul(torch.tensor(self.audio_mat), V[:, :self.dim_list[2]]).numpy()
             song_mat = np.hstack([song_mat, self.audio_mat])
         if self.lyric is not None:
+            # pca
+            if self.dim_list[3] > 0:
+                U, S, V = torch.pca_lowrank(torch.tensor(self.lyric_mat), q=self.dim_list[3])
+                self.lyric_mat = torch.matmul(torch.tensor(self.lyric_mat), V[:, :self.dim_list[3]]).numpy()
             song_mat = np.hstack([song_mat, self.lyric_mat])
         # delete the first column
         song_mat = song_mat[:, 1:]
@@ -400,7 +429,7 @@ class Dataset(object):
 
     # load audio features extracted from pre-trained model, e.g: musicnn
     # merge (method to merge sequence): 'avg': average pooling, 'max': max pooling
-    def load_audio_features(self, merge='avg'):
+    def load_audio_features(self, merge='max'):
         audio_mat_path = self.outdir + '{}_{}_mat.npy'.format(self.audio, merge)
         # check if there is cached matrix
         if os.path.exists(audio_mat_path):
@@ -444,6 +473,9 @@ class Dataset(object):
                     unfound_track_counter += 1
                     print("[Audio feature]Unfound track No.{}: {}".format(unfound_track_counter, ori_track_id))
                     continue
+        # normalize among dim 0
+        sum_of_dim = audio_mat.sum(axis=0)
+        audio_mat = audio_mat / sum_of_dim[np.newaxis, :]
         # save audio matrix to cache file
         np.save(audio_mat_path, audio_mat)
         return audio_mat

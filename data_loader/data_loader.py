@@ -28,7 +28,7 @@ meta_dict = {'key': 0, 'tempo': 1, 'energy': 2, 'valence': 3, 'liveness': 4, 'lo
     'instrumentalness': 11, 'mode': 12}
 
 audio_feature_list = ['musicnn']
-lyric_feature_list = ['tf-idf', 'doc2vec']
+lyric_feature_list = ['tf_idf', 'doc2vec']
 
 class Dataset(object):
 
@@ -86,7 +86,9 @@ class Dataset(object):
                 exit(0)
         # load lyric matrix
         if self.lyric is not None:
-            pass
+            self.lyric_mat = self.load_lyric_features()
+            if self.lyric_mat is None:
+                exit(0)
         # load song matrix
         self.song_mat = self.get_song_mat()
         # load train and test song matrix
@@ -479,7 +481,53 @@ class Dataset(object):
         # save audio matrix to cache file
         np.save(audio_mat_path, audio_mat)
         return audio_mat
-        
+
+    # load lyric features
+    def load_lyric_features(self):
+        lyric_mat_path = self.outdir + '{}_mat.npy'.format(self.lyric)
+        # check if there is cached matrix
+        if os.path.exists(lyric_mat_path):
+            lyric_mat = np.load(lyric_mat_path)
+            print("Load existed lyric feature matrix cache successfully!")
+            return lyric_mat
+        # load lyric feature matrix from lyric feature folder
+        print("No lyric feature cache file exists, load it from extracted features...")
+        lyric_feature_root = self.dataset_root + '/' + out_folder + \
+            '/{}_features'.format(self.lyric)
+        # load one matrix to get the shape
+        if not os.path.exists(lyric_feature_root):
+            print("Fail to find extracted lyric features: {} not exists".format(lyric_feature_root))
+            return None
+        lyric_feature_files = os.listdir(lyric_feature_root)
+        if len(lyric_feature_files) < 1:
+            print("No extracted lyric feature file exists in {}".format(lyric_feature_root))
+            return None
+        lyric_feature_sample = np.load(lyric_feature_root + '/' + lyric_feature_files[0])
+        lyric_feature_shape = lyric_feature_sample.shape
+        if self.lyric == 'tf_idf':
+            lyric_mat = np.zeros((len(self.song_dict), lyric_feature_shape[1]))
+            unfound_track_counter = 0
+            for track_id in tqdm(self.song_dict.keys()):
+                ori_track_id = track_id
+                # convert track_id to file name
+                if not track_id.find("spotify") == -1:
+                    track_id = track_id.split(":")[2]
+                track_id += '.npy'
+                # make sure the file exists
+                if track_id in lyric_feature_files:
+                    track_mat = np.load(lyric_feature_root + '/' + track_id)
+                    # save to audio matrix
+                    lyric_mat[self.song_dict[ori_track_id], :] = track_mat
+                else:
+                    unfound_track_counter += 1
+                    print("[Lyric feature]Unfound track No.{}: {}".format(unfound_track_counter, ori_track_id))
+                    continue
+        # normalize among dim 0
+        sum_of_dim = lyric_mat.sum(axis=0)
+        lyric_mat = lyric_mat / sum_of_dim[np.newaxis, :]
+        # save audio matrix to cache file
+        np.save(lyric_mat_path, lyric_mat)
+        return lyric_mat
 
 
 if __name__ == '__main__':

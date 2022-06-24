@@ -56,7 +56,7 @@
                 "--gen",
                 "--meta",
                 "--audio", "musicnn",
-                "--lyric", "None",
+                "--lyric", "tf_idf",
                 "--lr", "1e-3",
                 "-b", "50"
 

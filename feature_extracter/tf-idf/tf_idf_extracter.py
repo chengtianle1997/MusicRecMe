@@ -47,7 +47,7 @@ def extract_feature(in_folder, out_folder):
     # transform
     print("Transforming...")
     for in_file in tqdm(in_files):
-        out_vector = vectorizer.transform([in_folder + '/' + in_file])
+        out_vector = vectorizer.transform([in_folder + '/' + in_file]).toarray().astype(np.float32)
         out_file_path = out_folder + '/' + in_file.split('.')[0] + '.npy'
         np.save(out_file_path, out_vector)
     print("Lyric TF-IDF feature extraction complete!")

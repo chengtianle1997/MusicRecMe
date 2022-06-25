@@ -460,6 +460,9 @@ class MusicDB(object):
         else:
             return None
 
+    # Read all users 
+    # def read_all_users(self, filtered=False):
+
     # Read rows from echo nest table filtered with audio_lyric threshold
     # Input:
     # start: start index
@@ -469,7 +472,7 @@ class MusicDB(object):
     # success: [(user_id, playlist json, playlist_length), (...), ...] list of tuples
     # fail: None
     def read_filtered_echo_nest(self, start, length, audio_lyric_thres):
-        sql_cmd = "SELECT * FROM {} WHERE audio_lyric>={} LIMIT {}, {}"\
+        sql_cmd = "SELECT * FROM {} WHERE audio_lyric>={} and is_valid=0 LIMIT {}, {}"\
             .format(echo_nest_table_name, audio_lyric_thres, start, start + length)
         self.mycursor.execute(sql_cmd)
         if self.mycursor.rowcount > 0:
@@ -489,9 +492,15 @@ class MusicDB(object):
 
     def update_echo_nest(self, user_id, playlist, audio_lyric, completeness, is_valid):
         sql_cmd = "UPDATE {} ".format(echo_nest_table_name) + \
-         "SET playlist=%s, audio_lyric=%s, completeness=%s, is_valid=1 WHERE userid=%s"
-        val = (playlist, audio_lyric, completeness, user_id)
+         "SET playlist=%s, audio_lyric=%s, completeness=%s, is_valid=%s WHERE userid=%s"
+        val = (playlist, audio_lyric, completeness, is_valid, user_id)
         self.mycursor.execute(sql_cmd, val)
+        self.mydb.commit()
+
+    def update_echo_nest_valid_stat(self, user_id, is_valid):
+        sql_cmd = "UPDATE {} SET is_valid='{}' WHERE userid='{}'"\
+            .format(echo_nest_table_name, is_valid, user_id)
+        self.mycursor.execute(sql_cmd)
         self.mydb.commit()
 
     # Insert and read echo nest filter table (for generating dataset and sub-dataset)

@@ -378,11 +378,15 @@ class UserAttention(nn.Module):
 
         # return sequence embedding by PCA
         if self.return_seq is True:
-            U, S, V = torch.pca_lowrank(x, q=self.seq_k)
-            # return the seq_k main directions
-            # x = V.transpose(1, 2)
-            # x = torch.matmul(U.transpose(1, 2), x)
+            # return the first K
             return x[:, 0: self.seq_k, :].view(x.shape[0], self.seq_k, -1)
+            
+            # return principle k
+            # x_T = x.transpose(1, 2)  # [batch_size, embed_dim, seq_length]
+            # U, S, V = torch.pca_lowrank(x_T, q=self.seq_k)  
+            # # return the seq_k main directions
+            # x = torch.matmul(x_T, V).transpose(1, 2)
+            # return x
 
         # sum among sequence
         mask_ = mask[:, 0, :, 0].to(torch.float32)
@@ -402,7 +406,7 @@ class MusicEmbedding(nn.Module):
     '''
     Embedding for original music representation
     '''
-    def __init__(self, music_embed_dim, music_embed_dim_list, target_embed_dim_list=[32, 16, 64, 64]):
+    def __init__(self, music_embed_dim, music_embed_dim_list, target_embed_dim_list=[64, 0, 128, 128]):
         super().__init__()
         # take the original embedding dimension
         self.genre_in, self.meta_in, self.audio_in, self.lyric_in = \

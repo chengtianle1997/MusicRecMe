@@ -9,6 +9,8 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 
+from sklearn.decomposition import PCA
+
 # Path to generated dataset
 echo_nest_sub_path = 'dataset/echo_nest/sub_data/'
 echo_nest_whole_path = 'dataset/echo_nest/data/'
@@ -312,10 +314,14 @@ class Dataset(object):
                 self.audio_mat = torch.matmul(torch.tensor(self.audio_mat), V[:, :self.dim_list[2]]).numpy()
             song_mat = np.hstack([song_mat, self.audio_mat])
         if self.lyric is not None:
-            # pca
+            # pca (torch)
             if self.dim_list[3] > 0:
                 U, S, V = torch.pca_lowrank(torch.tensor(self.lyric_mat), q=self.dim_list[3])
                 self.lyric_mat = torch.matmul(torch.tensor(self.lyric_mat), V[:, :self.dim_list[3]]).numpy()
+            # pca (sklearn)
+            # if self.dim_list[3] > 0:
+            #     pca = PCA(n_components=self.dim_list[3])
+            #     self.lyric_mat = pca.fit_transform(self.lyric_mat)
             song_mat = np.hstack([song_mat, self.lyric_mat])
         # delete the first column
         song_mat = song_mat[:, 1:]
@@ -504,6 +510,8 @@ class Dataset(object):
             return None
         lyric_feature_sample = np.load(lyric_feature_root + '/' + lyric_feature_files[0])
         lyric_feature_shape = lyric_feature_sample.shape
+        # load lyric feature names
+        self.lyric_feature_names = np.load(lyric_feature_root + '/feature_names.npy', allow_pickle=True)
         if self.lyric == 'tf_idf':
             lyric_mat = np.zeros((len(self.song_dict), lyric_feature_shape[1]))
             unfound_track_counter = 0
@@ -524,6 +532,8 @@ class Dataset(object):
                     continue
         # normalize among dim 0
         sum_of_dim = lyric_mat.sum(axis=0)
+        # replace zeros with epsilon
+        sum_of_dim[sum_of_dim < 1e-9] = 1e-9
         lyric_mat = lyric_mat / sum_of_dim[np.newaxis, :]
         # save audio matrix to cache file
         np.save(lyric_mat_path, lyric_mat)

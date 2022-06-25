@@ -24,7 +24,7 @@ learning_rate = 1e-3
 early_stop_steps = 50 # early stopping triggered if over early_stop_steps no update
 loss_type = 'seq_cos' # 'cos' or 'rmse' or 'seq_cos'
 loss_type_list = ['rmse', 'cos', 'seq_cos']
-seq_k = 10
+seq_k = 5
 use_music_embedding = False
 include_x_loss = True
 
@@ -180,7 +180,7 @@ def train(args):
     
     # load training data
     dataset = data_loader.Dataset(dataset_root='E:', sub=args.sub, genre=args.gen, meta=args.meta, \
-        audio=args.audio, lyric=args.lyric, outdir=cache_folder)
+        audio=args.audio, lyric=args.lyric, outdir=cache_folder, dim_list=[0, 0, 0, 0] if use_music_embedding else [64, 0, 128, 128])
     music_embed_dim, music_embed_dim_list = dataset.get_dim()
     log.print("dataset loaded:")
     log.print("music embed dim: {} [{}, {}, {}, {}]".format(music_embed_dim, music_embed_dim_list[0], \

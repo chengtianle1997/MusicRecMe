@@ -22,7 +22,7 @@ _music_path = 'dataset/base/music'
 _lyric_path = 'dataset/base/lyric_raw'
 
 MAX_LINE_LIMIT = 100
-MIN_PLAYLIST_LEN = 5
+MIN_PLAYLIST_LEN = 10
 
 # check if the song is a new song
 def is_new(time, thres):
@@ -265,18 +265,19 @@ def valid_echo_nest(dataset_root, line_num=1000, old_new_gap='2008-01-01', sub=T
     # line_num is None means read all data from echo nest raw table
     while line_num is None or valid_line_count < line_num:
         # Get rows from echo nest table
-        rows = db.read_echo_nest(start_line, MAX_LINE_LIMIT)
+        rows = db.read_filtered_echo_nest(start_line, MAX_LINE_LIMIT, MIN_PLAYLIST_LEN)
         start_line += MAX_LINE_LIMIT
         if rows is None:
             print("There is no more data to read from echo nest raw table!")
             break
         # iterate rows: each row is a playlist
         for row in rows:
-            playlist = json.loads(row['playlist'])
-            
+
             # check if playlist exists
             if db.check_if_user_exists_filter(row['user_id']):
                 continue
+
+            playlist = json.loads(row['playlist'])
 
             new_playlist = []
             audio_lyric = 0
@@ -379,6 +380,8 @@ def valid_echo_nest(dataset_root, line_num=1000, old_new_gap='2008-01-01', sub=T
             else:
                 print("User id {}: playlist too short with {} songs [old: {}, new: {}]"\
                     .format(row['user_id'], len(new_playlist), old_count, new_count))
+                # mark as validated
+                # db.update_echo_nest_valid_stat(row['user_id'], 1)
             # update echo nest raw table
             db.update_echo_nest(row['user_id'], json.dumps(playlist), audio_lyric, \
                 float(audio_lyric) / len(playlist), 1)

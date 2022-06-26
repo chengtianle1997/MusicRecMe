@@ -21,10 +21,10 @@ import numpy as np
 # Params
 batch_size = 50
 learning_rate = 1e-3
-early_stop_steps = 50 # early stopping triggered if over early_stop_steps no update
+early_stop_steps = 30 # early stopping triggered if over early_stop_steps no update
 loss_type = 'seq_cos' # 'cos' or 'rmse' or 'seq_cos'
 loss_type_list = ['rmse', 'cos', 'seq_cos']
-seq_k = 5
+seq_k = 10
 use_music_embedding = False
 include_x_loss = True
 

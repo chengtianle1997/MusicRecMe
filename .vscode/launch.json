@@ -56,7 +56,8 @@
                 "--gen",
                 "--meta",
                 "--audio", "musicnn",
-                "--lyric", "tf_idf",
+                //"--lyric", "tf_idf",
+                "--lyric", "glove",
                 "--lr", "1e-3",
                 "-b", "50"
 

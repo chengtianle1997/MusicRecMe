@@ -22,7 +22,7 @@ import argparse
 
 # raw music file folder
 in_folder = 'dataset/base/music'
-out_folder = 'dataset/base/musicnn_features'
+out_folder = 'dataset/base/musicnn_features_msd'
 
 # file_name = './audio/joram-moments_of_clarity-08-solipsism-59-88.mp3'
 # file_name = './audio/TRWJAZW128F42760DD_test.mp3'
@@ -34,7 +34,7 @@ out_folder = 'dataset/base/musicnn_features'
 # print(features.keys())
 
 class extractor(object):
-    def __init__(self, model='MTT_musicnn', input_length=3, input_overlap=False):
+    def __init__(self, model='MSD_musicnn', input_length=3, input_overlap=False):
         # save param
         self.input_length = input_length
         self.input_overlap = input_overlap

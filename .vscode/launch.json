@@ -54,10 +54,11 @@
                 "-r", "E:",
                 "--sub",  // sub dataset for debugging and testing
                 "--gen",
-                "--meta",
+                //"--meta",
                 "--audio", "musicnn",
+                //"--audio", "None",
                 //"--lyric", "tf_idf",
-                "--lyric", "glove",
+                "--lyric", "None",
                 "--lr", "1e-3",
                 "-b", "50"
 

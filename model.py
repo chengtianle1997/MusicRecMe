@@ -181,6 +181,7 @@ class SequenceEmbedLoss(nn.Module):
         valid_num = y_mask.sum()
         loss = (loss * y_mask).sum() / valid_num
         return torch.sqrt(loss)
+        #return loss
 
 class MusicRecommenderSequenceEmbed(object):
     '''
@@ -320,7 +321,8 @@ class UserAttention(nn.Module):
     The user embedding model with attention on their playlists
     '''
     def __init__(self, music_embed_dim, music_embed_dim_list, embed_dim=None, \
-        dropout=0.1, num_heads=1, re_embed=False, return_seq=False, seq_k=5):
+        dropout=0.1, num_heads=1, re_embed=False, return_seq=False, seq_k=5, \
+        check_baseline=False):
         '''
         music_embed_dim: dimension of music embedding
         music_embed_dim_list []: list of [genre, meta, audio, lyric] dimension
@@ -337,6 +339,7 @@ class UserAttention(nn.Module):
         self.seq_k = seq_k
 
         self.re_embed = re_embed
+        self.check_baseline = check_baseline
 
         # re-embed audio and lyric for a smaller attention dim
         if re_embed is True:
@@ -360,6 +363,10 @@ class UserAttention(nn.Module):
         # input x: [batch_size, seq_length, music_embed_dim]
         # mask: [batch_size, seq_length, seq_length]
 
+        # for baseline
+        if self.check_baseline:
+            return x[:, :self.seq_k, :]
+
         # convert mask
         if mask is not None:
             mask = mask.reshape(mask.shape[0], 1, mask.shape[1], mask.shape[2]) # [batch_size, 1, seq_length, seq_length]
@@ -381,6 +388,9 @@ class UserAttention(nn.Module):
             # return the first K
             return x[:, 0: self.seq_k, :].view(x.shape[0], self.seq_k, -1)
             
+            # return the whole sequence
+            # return x[:, :, :]  # CUDA out of memory
+
             # return principle k
             # x_T = x.transpose(1, 2)  # [batch_size, embed_dim, seq_length]
             # U, S, V = torch.pca_lowrank(x_T, q=self.seq_k)  

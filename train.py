@@ -27,6 +27,8 @@ loss_type_list = ['rmse', 'cos', 'seq_cos']
 seq_k = 10
 use_music_embedding = False
 include_x_loss = True
+use_data_pca = False
+check_baseline = False
 
 echo_nest_sub_path = 'dataset/echo_nest/sub_data'
 echo_nest_whole_path = 'dataset/echo_nest/data'
@@ -180,7 +182,7 @@ def train(args):
     
     # load training data
     dataset = data_loader.Dataset(dataset_root='E:', sub=args.sub, genre=args.gen, meta=args.meta, \
-        audio=args.audio, lyric=args.lyric, outdir=cache_folder, dim_list=[0, 0, 0, 0] if use_music_embedding else [64, 0, 128, 128])
+        audio=args.audio, lyric=args.lyric, outdir=cache_folder, dim_list=[0, 0, 0, 0] if use_music_embedding or not use_data_pca else [64, 0, 128, 128])
     music_embed_dim, music_embed_dim_list = dataset.get_dim()
     log.print("dataset loaded:")
     log.print("music embed dim: {} [{}, {}, {}, {}]".format(music_embed_dim, music_embed_dim_list[0], \
@@ -206,7 +208,8 @@ def train(args):
         exit
     # load model
     model = Model.UserAttention(music_embed_dim, music_embed_dim_list, \
-        return_seq=True if loss_type=='seq_cos' else False, seq_k=seq_k, re_embed=use_music_embedding)
+        return_seq=True if loss_type=='seq_cos' else False, seq_k=seq_k, re_embed=use_music_embedding, \
+        check_baseline=check_baseline)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     mse_loss = nn.MSELoss(reduction='none') # do not calculate mean or sum
     cos_sim_loss = nn.CosineSimilarity(dim=2) # cosine similarity on embedding dimension
@@ -288,8 +291,9 @@ def train(args):
                 loss = seq_cos_loss(pred, y, y_mask, model=model if use_music_embedding else None, \
                     x=x if include_x_loss else None, x_mask=x_y_mask if include_x_loss else None)
             # back propagation
-            loss.backward()
-            optimizer.step()
+            if not check_baseline:
+                loss.backward()
+                optimizer.step()
             train_loss_batch.append(loss.item())
             # log.print("Epoch: {}, Batch: {}, train loss: {}".format(epoch, i, loss.item()))
         

@@ -429,7 +429,7 @@ class Dataset(object):
                 continue
             for meta_key in meta_dict.keys():
                 meta_mat[self.song_dict[track_id], meta_dict[meta_key]] = meta_info[meta_key]
-        # standardize the features
+        # normalize the features
         meta_mat = (meta_mat - meta_mat.min(axis=0)) / meta_mat.ptp(axis=0)
         # save meta matrix as cache file
         np.save(meta_mat_path, meta_mat)
@@ -481,9 +481,32 @@ class Dataset(object):
                     unfound_track_counter += 1
                     print("[Audio feature]Unfound track No.{}: {}".format(unfound_track_counter, ori_track_id))
                     continue
-        # normalize among dim 0
-        sum_of_dim = audio_mat.sum(axis=0)
-        audio_mat = audio_mat / sum_of_dim[np.newaxis, :]
+        
+        # old version
+        # sum_of_dim = audio_mat.sum(axis=0)
+        # audio_mat = audio_mat / sum_of_dim[np.newaxis, :]
+        
+        # normalize among dim 1 
+        ptp = audio_mat.ptp(axis=1)
+        ptp[ptp < 1e-9] = 1e-9
+        ptp = np.reshape(ptp, (audio_mat.shape[0], 1))
+        ptp = np.repeat(ptp, audio_mat.shape[1], axis=1)
+        min_mat = np.reshape(audio_mat.min(axis=1), (audio_mat.shape[0], 1))
+        min_mat = np.repeat(min_mat, audio_mat.shape[1], axis=1)
+        audio_mat = (audio_mat - min_mat) / ptp
+        
+        # standardize among dim 0
+        # std = audio_mat.std(axis=0)
+        # std[std < 1e-9] = 1e-9
+        # audio_mat = (audio_mat - audio_mat.mean(axis=0)) / std
+        # standardize among dim 1
+        # std = audio_mat.std(axis=1)
+        # std[std < 1e-9] = 1e-9
+        # std = np.reshape(std, (audio_mat.shape[0], 1))
+        # std = np.repeat(std, audio_mat.shape[1], axis=1)
+        # mean_mat = np.reshape(audio_mat.min(axis=1), (audio_mat.shape[0], 1))
+        # mean_mat = np.repeat(mean_mat, audio_mat.shape[1], axis=1)
+        # audio_mat = (audio_mat - mean_mat) / std
         # save audio matrix to cache file
         np.save(audio_mat_path, audio_mat)
         return audio_mat
@@ -546,12 +569,23 @@ class Dataset(object):
                 # convert track_id to file name
                 if not track_id.find("spotify") == -1:
                     track_id = track_id.split(":")[2]
+                track_weights_pkl = track_id + '.pkl'
                 track_id += '.npy'
                 # make sure the file exists
                 if track_id in lyric_feature_files:
                     track_mat = np.load(lyric_feature_root + '/' + track_id)
+                    # weighted average mixture
+                    # load weights, which is the frequency of the word token
+                    track_weights_f = open(lyric_feature_root + '/' + track_weights_pkl, 'rb')
+                    track_weights_raw = pickle.load(track_weights_f)
+                    track_weights = np.array([weight[1] for weight in track_weights_raw])
+                    track_weights_sum = track_weights.sum()
+                    track_weights = np.reshape(track_weights / track_weights_sum, (track_weights.shape[0], 1))
+                    track_weights = np.repeat(track_weights, track_mat.shape[1], axis=1)
+                    track_mat = track_mat * track_weights
+                    track_mat = track_mat.sum(axis=0)
                     # mean mixture
-                    track_mat = track_mat.mean(axis=0)
+                    # track_mat = track_mat.mean(axis=0)
                     # max mixture
                     # track_mat = track_mat.max(axis=0)
                     # save to audio matrix

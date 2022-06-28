@@ -183,18 +183,34 @@ class SequenceEmbedLoss(nn.Module):
         return torch.sqrt(loss)
         #return loss
 
+def get_recalls(gt, top_k_track):
+    gt_set = set(gt)
+    # top 10, 50, 100 recall
+    top_10_inter = set(top_k_track[0:10]) & gt_set
+    top_50_inter = set(top_k_track[0:50]) & gt_set
+    top_100_inter = set(top_k_track[0:100]) & gt_set
+    # top_10_recall_num += len(top_10_inter)
+    # top_50_recall_num += len(top_50_inter)
+    # top_100_recall_num += len(top_100_inter)
+    # ground_truth_num += len(gt_set)
+    recalls_num = np.array([len(top_10_inter), len(top_50_inter), len(top_100_inter), len(gt_set)])
+    return recalls_num
+
+
 class MusicRecommenderSequenceEmbed(object):
     '''
     Recommend songs according to song dictionary and user embedding
     '''
     def __init__(self, dataset, device, mode='train', model=None, use_music_embedding=False):
         self.device = device
+        self.mode = mode
         if mode == 'train':
             self.song_dict = dataset.train_song_dict
             self.song_mat = torch.tensor(dataset.train_song_mat).to(device)
         elif mode == 'test':
             self.song_dict = dataset.test_song_dict
             self.song_mat = torch.tensor(dataset.test_song_mat).to(device)
+            self.song_old_new_dict = dataset.song_old_new_dict
         # reshape: song_mat = [song_num, song_embed_dim, 1]
         # self.song_mat = self.song_mat.reshape(self.song_mat.shape[0], self.song_mat.shape[1], 1)
         self.cos_sim = nn.CosineSimilarity(dim=1)
@@ -220,6 +236,10 @@ class MusicRecommenderSequenceEmbed(object):
         top_50_recall_num = 0
         top_100_recall_num = 0
         ground_truth_num = 0
+        # numpy matrix to save recall numbers
+        recalls_num_counter = np.zeros(4)
+        recalls_old_num_counter = np.zeros(4)
+        recalls_new_num_counter = np.zeros(4)
         top_10_track_list = []
         # top_10_track_mat = [batch_size, 10, embed_dim]
         top_10_track_mat = torch.zeros((batch_size, 10, self.song_mat.shape[1])).to(self.device)
@@ -248,20 +268,38 @@ class MusicRecommenderSequenceEmbed(object):
             for n in range(10):
                 top_10_track_mat[i, n, :] = self.song_mat[int(top_k_index[n])]
             # get intersection of predicted track and groud truth tracks
-            gt_set = set(y_valid_tracks[i])
-            # top 10, 50, 100 recall
-            top_10_inter = set(top_k_track[0:10]) & gt_set
-            top_50_inter = set(top_k_track[0:50]) & gt_set
-            top_100_inter = set(top_k_track[0:100]) & gt_set
-            top_10_recall_num += len(top_10_inter)
-            top_50_recall_num += len(top_50_inter)
-            top_100_recall_num += len(top_100_inter)
-            ground_truth_num += len(gt_set)
-        
-        recalls = [top_10_recall_num / ground_truth_num, top_50_recall_num / ground_truth_num, \
-            top_100_recall_num / ground_truth_num]
+            recalls_num = get_recalls(y_valid_tracks[i], top_k_track)
+            # gt_set = set(y_valid_tracks[i])
+            # # top 10, 50, 100 recall
+            # top_10_inter = set(top_k_track[0:10]) & gt_set
+            # top_50_inter = set(top_k_track[0:50]) & gt_set
+            # top_100_inter = set(top_k_track[0:100]) & gt_set
+            recalls_num_counter = recalls_num_counter + recalls_num
+            if self.mode == 'test':
+                # recalls for old and new songs
+                y_valid_tracks_new = [track for track in y_valid_tracks[i] if self.song_old_new_dict[track]==1]
+                y_valid_tracks_old = [track for track in y_valid_tracks[i] if self.song_old_new_dict[track]==0]
+                recalls_new = get_recalls(y_valid_tracks_new, top_k_track)
+                recalls_old = get_recalls(y_valid_tracks_old, top_k_track)
+                recalls_new_num_counter += recalls_new
+                recalls_old_num_counter += recalls_old
+
+        recalls = [recalls_num_counter[0] / recalls_num_counter[3], \
+                    recalls_num_counter[1] / recalls_num_counter[3], \
+                    recalls_num_counter[2] / recalls_num_counter[3]]
+
         if return_songs is True:
-            return top_10_track_list, top_10_track_mat, recalls
+            if self.mode == 'test':
+                recalls_new = [recalls_new_num_counter[0] / recalls_new_num_counter[3], \
+                    recalls_new_num_counter[1] / recalls_new_num_counter[3], \
+                    recalls_new_num_counter[2] / recalls_new_num_counter[3]]
+                recalls_old = [recalls_old_num_counter[0] / recalls_old_num_counter[3], \
+                    recalls_old_num_counter[1] / recalls_old_num_counter[3], \
+                    recalls_old_num_counter[2] / recalls_old_num_counter[3]]
+                top_10_track_list, top_10_track_mat
+                return top_10_track_list, top_10_track_mat, recalls, recalls_old, recalls_new
+            else:
+                return top_10_track_list, top_10_track_mat, recalls
         else:
             # calculate recall rate
             return recalls
@@ -411,7 +449,7 @@ class UserAttention(nn.Module):
         
         return x
 
-
+# Music re-embedding: Cannot support cpu training
 class MusicEmbedding(nn.Module):
     '''
     Embedding for original music representation

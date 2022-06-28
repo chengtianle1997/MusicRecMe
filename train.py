@@ -345,7 +345,8 @@ def train(args):
         update_visualizer(vis, opts)
         
         # check if it is a better model
-        if valid_loss < best_valid_loss or recalls[1] > best_recall_50:
+        # if valid_loss < best_valid_loss or recalls[1] > best_recall_50:
+        if recalls[1] > best_recall_50:
             # save the model
             torch.save({
                 'epoch': epoch,

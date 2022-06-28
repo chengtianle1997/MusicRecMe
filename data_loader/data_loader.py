@@ -20,6 +20,7 @@ out_folder = 'dataset/base/'
 
 # cached matrices and dictionaries name
 song_dict_name = 'song_dict.npy'
+song_old_new_dict_name = 'song_old_new_dict.npy'
 genre_dict_name = 'genre_dict.npy' # for a genre tag list with index for genre matrix
 genre_mat_name = 'genre_mat.npy'
 meta_mat_name = 'meta_mat.npy'
@@ -72,7 +73,7 @@ class Dataset(object):
         if self.song_json is None:
             exit(0)
         # load song dict
-        self.song_dict = self.load_song_dict()
+        self.song_dict, self.song_old_new_dict = self.load_song_dict()
         if self.song_dict is None:
             exit(0)
         # load genre dict and matrix
@@ -146,8 +147,8 @@ class Dataset(object):
     # Return: [x_len, y_len, x_mat, y_mat]
     # x_len: list of song numbers in x
     # y_len: list of song numbers in y
-    # x_mat: list of songs in x
-    # y_mat: list of songs in y
+    # x_mat: list of songs track ids in x
+    # y_mat: list of songs track ids in y
     def get_data(self, shuffle=True, set_tag='train'):
         if set_tag == 'train':
             if shuffle is True:
@@ -158,16 +159,12 @@ class Dataset(object):
             y_mat = [data['y'] for data in self.train_mat]
             return x_len, y_len, x_mat, y_mat
         elif set_tag == 'valid':
-            if shuffle is True:
-                random.shuffle(self.valid_mat)
             x_len = [len(data['x']) for data in self.valid_mat]
             y_len = [len(data['y']) for data in self.valid_mat]
             x_mat = [data['x'] for data in self.valid_mat]
             y_mat = [data['y'] for data in self.valid_mat]
             return x_len, y_len, x_mat, y_mat
         elif set_tag == 'test':
-            if shuffle is True:
-                random.shuffle(self.test_mat)
             x_len = [len(data['x']) for data in self.test_mat]
             y_len = [len(data['y']) for data in self.test_mat]
             x_mat = [data['x'] for data in self.test_mat]
@@ -358,19 +355,24 @@ class Dataset(object):
     # load song json as a dictionary: key: track id, value: track index for other matrices
     def load_song_dict(self):
         song_dict_path = self.outdir + song_dict_name
+        song_old_new_dict_path = self.outdir + song_old_new_dict_name
         # check if there is song dictionary cache exists
-        if os.path.exists(song_dict_path):
+        if os.path.exists(song_dict_path) and os.path.exists(song_old_new_dict_path):
             song_dict = np.load(song_dict_path, allow_pickle='TRUE').item()
+            song_old_new_dict = np.load(song_old_new_dict_path, allow_pickle='TRUE').item()
             print("Load existed song dictionary cache successfully!")
-            return song_dict
+            return song_dict, song_old_new_dict
         # load song dict from song json file
         print("No song dictionary cache exists, load it from {}...".format(self.song_json_url))
         song_dict = {}
+        song_old_new_dict = {}
         for track_id in tqdm(self.song_json.keys()):
             song_dict[track_id] = len(song_dict)
+            song_old_new_dict[track_id] = self.song_json[track_id]['is_new']
         # save song dict as cache file
         np.save(song_dict_path, song_dict)
-        return song_dict
+        np.save(song_old_new_dict_path, song_old_new_dict)
+        return song_dict, song_old_new_dict
 
     # load genre tag dict
     # tag: 'genre_top' or 'genre_raw'

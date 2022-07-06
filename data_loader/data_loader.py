@@ -11,6 +11,9 @@ from torch.nn.utils.rnn import pad_sequence
 
 from sklearn.decomposition import PCA
 
+# set a random seed
+random.seed(2022)
+
 # Path to generated dataset
 echo_nest_sub_path = 'dataset/echo_nest/sub_data/'
 echo_nest_whole_path = 'dataset/echo_nest/data/'
@@ -149,27 +152,46 @@ class Dataset(object):
     # y_len: list of song numbers in y
     # x_mat: list of songs track ids in x
     # y_mat: list of songs track ids in y
-    def get_data(self, shuffle=True, set_tag='train'):
+    def get_data(self, shuffle=True, set_tag='train', neg_samp=False):
+        # training set
         if set_tag == 'train':
             if shuffle is True:
                 random.shuffle(self.train_mat)
             x_len = [len(data['x']) for data in self.train_mat]
             y_len = [len(data['y']) for data in self.train_mat]
             x_mat = [data['x'] for data in self.train_mat]
-            y_mat = [data['y'] for data in self.train_mat]
-            return x_len, y_len, x_mat, y_mat
+            y_mat = [data['y'] for data in self.train_mat]     
+        # valid set
         elif set_tag == 'valid':
             x_len = [len(data['x']) for data in self.valid_mat]
             y_len = [len(data['y']) for data in self.valid_mat]
             x_mat = [data['x'] for data in self.valid_mat]
             y_mat = [data['y'] for data in self.valid_mat]
-            return x_len, y_len, x_mat, y_mat
+        # test set
         elif set_tag == 'test':
             x_len = [len(data['x']) for data in self.test_mat]
             y_len = [len(data['y']) for data in self.test_mat]
             x_mat = [data['x'] for data in self.test_mat]
             y_mat = [data['y'] for data in self.test_mat]
+        # negative sampling
+        if neg_samp is True:
+            y_neg_len, y_neg_mat = self.get_neg_data(x_mat, y_mat)
+            return [x_len, y_len, x_mat, y_mat, y_neg_len, y_neg_mat]
+        else:
             return [x_len, y_len, x_mat, y_mat]
+    
+    # get negative samples randomly from other songs
+    def get_neg_data(self, x_mat, y_mat, k=3):
+        all_set = set(self.song_dict.keys())
+        y_neg_mat = []
+        y_neg_len = []
+        for idx in range(len(x_mat)):
+            in_set = set(x_mat[idx]) | set(y_mat[idx])
+            other_set = list(all_set - in_set)
+            # random sampling
+            y_neg_mat.append(random.sample(other_set, k * len(y_mat[idx])))
+            y_neg_len.append(k * len(y_mat[idx]))
+        return y_neg_len, y_neg_mat
 
     # get dict and matrix, set_tag = [None (for all songs), 'train', 'test']
     # Return:
@@ -190,32 +212,49 @@ class Dataset(object):
     # batch_size: batch size
     # fix_length: True = all batched data are in max_length, same sequence length among batches
     #             False = only data in one batch are in the same length, various sequence length among batches
-    def get_batched_data(self, len_mat_res, batch_size=50, fix_length=False):
-        x_len, y_len, x_mat, y_mat = len_mat_res[0], len_mat_res[1], len_mat_res[2], len_mat_res[3]
+    def get_batched_data(self, len_mat_res, batch_size=50, fix_length=False, neg_samp=False):
+        if neg_samp is True:
+            x_len, y_len, x_mat, y_mat, y_neg_len, y_neg_mat = len_mat_res[0], len_mat_res[1], len_mat_res[2], len_mat_res[3], len_mat_res[4], len_mat_res[5]
+        else:
+            x_len, y_len, x_mat, y_mat = len_mat_res[0], len_mat_res[1], len_mat_res[2], len_mat_res[3]
         batch_num = int(len(x_len) / batch_size)
         x_len_list = []
         y_len_list = []
+        y_neg_len_list = []
         x_mat_tensor_list = []
         y_mat_tensor_list = []
         # convert mat to list of tensors -> [sample_num, playlist_length, music_embed_dim]
         x_mat = [torch.tensor(np.array([self.song_mat[self.song_dict[track_id]] for track_id in x]), dtype=torch.float32) for x in x_mat]
         y_mat = [torch.tensor(np.array([self.song_mat[self.song_dict[track_id]] for track_id in y]), dtype=torch.float32) for y in y_mat]
+        if neg_samp is True:
+            y_neg_mat = [torch.tensor(np.array([self.song_mat[self.song_dict[track_id]] for track_id in y]), dtype=torch.float32) for y in y_neg_mat]
+            y_neg_mat_tensor_list = []
         # iterate batches
         for batch_idx in range(batch_num):
             x_len_list.append(x_len[batch_idx * batch_size: (batch_idx + 1) * batch_size])
             y_len_list.append(y_len[batch_idx * batch_size: (batch_idx + 1) * batch_size])
+            y_neg_len_list.append(y_neg_len[batch_idx * batch_size: (batch_idx + 1) * batch_size])
             if fix_length is True:
                 # pad the first sequence to disired length
                 x_mat[batch_idx * batch_size] = nn.ConstantPad2d\
                     ((0, 0, self.x_len_max - x_mat[batch_idx * batch_size].shape[0], 0), 0)(x_mat[batch_idx * batch_size])
                 y_mat[batch_idx * batch_size] = nn.ConstantPad2d\
                     ((0, 0, self.y_len_max - y_mat[batch_idx * batch_size].shape[0], 0), 0)(y_mat[batch_idx * batch_size])
+                if neg_samp is True:
+                    y_neg_mat[batch_idx * batch_size] = nn.ConstantPad2d\
+                    ((0, 0, self.y_len_max - y_neg_mat[batch_idx * batch_size].shape[0], 0), 0)(y_neg_mat[batch_idx * batch_size])
             # padding
             x_mat_padded_idx = pad_sequence(x_mat[batch_idx * batch_size: (batch_idx + 1) * batch_size], batch_first=True)
             x_mat_tensor_list.append(x_mat_padded_idx) # [batch_size, padded_seq_len, music_embed_dim]
             y_mat_padded_idx = pad_sequence(y_mat[batch_idx * batch_size: (batch_idx + 1) * batch_size], batch_first=True)
             y_mat_tensor_list.append(y_mat_padded_idx) # [batch_size, padded_seq_len, music_embed_dim]
-        return x_len_list, y_len_list, x_mat_tensor_list, y_mat_tensor_list
+            if neg_samp is True:
+                y_neg_mat_padded_idx = pad_sequence(y_neg_mat[batch_idx * batch_size: (batch_idx + 1) * batch_size], batch_first=True)
+                y_neg_mat_tensor_list.append(y_neg_mat_padded_idx) # [batch_size, padded_seq_len, music_embed_dim]
+        if neg_samp is True:
+            return x_len_list, y_len_list, x_mat_tensor_list, y_mat_tensor_list, y_neg_len_list, y_neg_mat_tensor_list
+        else:
+            return x_len_list, y_len_list, x_mat_tensor_list, y_mat_tensor_list
 
 
     # get the maximum sequence length among train, valid and test data
@@ -402,7 +441,7 @@ class Dataset(object):
                     genre_dict[genre_tag] = len(genre_dict)
         # load genre matrix
         print("Load genre matrix...")
-        genre_mat = np.zeros((len(self.song_dict), len(genre_dict)), dtype=np.float32)
+        genre_mat = np.zeros((len(self.song_dict), len(genre_dict) + 1), dtype=np.float32)
         for track_id in tqdm(self.song_dict.keys()):
             tags = json.loads(self.song_json[track_id][tag])
             if tags is None:
@@ -432,7 +471,16 @@ class Dataset(object):
             for meta_key in meta_dict.keys():
                 meta_mat[self.song_dict[track_id], meta_dict[meta_key]] = meta_info[meta_key]
         # normalize the features
-        meta_mat = (meta_mat - meta_mat.min(axis=0)) / meta_mat.ptp(axis=0)
+        #meta_mat = meta_mat - meta_mat.min(axis=0)
+        #meta_mat[meta_mat < 1e-9] = 1e-9
+        # normalize
+        # meta_mat = (meta_mat - meta_mat.min(axis=0)) / meta_mat.ptp(axis=0)
+        # standardize
+        meta_mat = (meta_mat - meta_mat.mean(axis=0)) / meta_mat.std(axis=0)
+
+        # expand the dimension of meta features from 13 to 130
+        meta_mat = np.tile(meta_mat, (1, 10))
+
         # save meta matrix as cache file
         np.save(meta_mat_path, meta_mat)
         return meta_mat
@@ -488,7 +536,7 @@ class Dataset(object):
         # sum_of_dim = audio_mat.sum(axis=0)
         # audio_mat = audio_mat / sum_of_dim[np.newaxis, :]
         
-        # normalize among dim 1 
+        # normalize among dim 1 (final choice)
         ptp = audio_mat.ptp(axis=1)
         ptp[ptp < 1e-9] = 1e-9
         ptp = np.reshape(ptp, (audio_mat.shape[0], 1))

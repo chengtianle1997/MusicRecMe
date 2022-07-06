@@ -14,7 +14,7 @@ import argparse
 db = musicdb.MusicDB()
 
 # Path to generated dataset
-echo_nest_sub_path = 'dataset/echo_nest/sub_data'
+echo_nest_sub_path = 'dataset/echo_nest/sub_data_new'
 echo_nest_whole_path = 'dataset/echo_nest/data'
 
 # Path to raw dataset
@@ -23,6 +23,8 @@ _lyric_path = 'dataset/base/lyric_raw'
 
 MAX_LINE_LIMIT = 100
 MIN_PLAYLIST_LEN = 10
+
+x_y_ratio = 0.8
 
 # check if the song is a new song
 def is_new(time, thres):
@@ -475,7 +477,7 @@ def save_song_json(url, song_json):
 MIN_LENGTH_OLD = 5
 
 # generate json file from echo nest filter table
-def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_gap='2008-01-01', sub=True):
+def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_gap='2008-01-01', sub=True, x_y_ratio=0.5):
     # use the previous dataset
     db = musicdb.MusicDB(database)
     # set path to each folder
@@ -580,13 +582,19 @@ def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_g
             #     continue
             # read one playlist, re-arrange it
             playlist = json.loads(row['playlist'])
+            # filter playlist less than 20 songs
+            if len(playlist) < 20:
+                continue
             playlist, end_pos = arrange_playlist(playlist, old_new_gap)
+            # filter playlist with less than 10 old songs
+            if end_pos < 9:
+                continue
             # insert the playlist to json file
             # For training data
             if line_valid_counter < train_num:
                 res_dict = {}
-                res_dict['x'] = playlist[0: int(0.8 * end_pos)]
-                res_dict['y'] = playlist[int(0.8 * end_pos): end_pos + 1]
+                res_dict['x'] = playlist[0: int(x_y_ratio * end_pos)]
+                res_dict['y'] = playlist[int(x_y_ratio * end_pos): end_pos + 1]
                 train_json.insert(res_dict)
                 # save songs to song json train
                 for song in playlist[0: end_pos + 1]:
@@ -599,8 +607,8 @@ def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_g
                     # save the last train json
                     train_json.save()
                 res_dict = {}
-                res_dict['x'] = playlist[0: int(0.8 * end_pos)]
-                res_dict['y'] = playlist[int(0.8 * end_pos): end_pos + 1]
+                res_dict['x'] = playlist[0: int(x_y_ratio * end_pos)]
+                res_dict['y'] = playlist[int(x_y_ratio * end_pos): end_pos + 1]
                 valid_json.insert(res_dict)
                 # save songs to song json train
                 for song in playlist[0: end_pos + 1]:
@@ -613,8 +621,8 @@ def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_g
                     # save the last valid json
                     valid_json.save()
                 res_dict = {}
-                res_dict['x'] = playlist[0: int(0.8 * end_pos)]
-                res_dict['y'] = playlist[int(0.8 * end_pos):]
+                res_dict['x'] = playlist[0: int(x_y_ratio * end_pos)]
+                res_dict['y'] = playlist[int(x_y_ratio * end_pos):]
                 test_json.insert(res_dict)
                 # save songs to song json test
                 for song in playlist:
@@ -652,9 +660,10 @@ if __name__ == '__main__':
     parser.add_argument('--valid', '-v', action='store_true', help='Validate dataset')
     parser.add_argument('--gen', '-g', action='store_true', help='Generate dataset')
     parser.add_argument('--root', '-r', type=str, default='E:', help='Dataset root Path (the path where the dataset folder in)')
-    parser.add_argument('--thres', '-t', type=str, default='2011-01-01', help='The threshold for new and old song (designed for a cold start scenario)')
+    parser.add_argument('--thres', '-t', type=str, default='2008-01-01', help='The threshold for new and old song (designed for a cold start scenario)')
     parser.add_argument('--num', '-n', type=int, default=0, help='The number of playlist you would like to collect')
     parser.add_argument('--sub', '-s', action='store_true', help='Generate sub-dataset for debugging and testing')
+    parser.add_argument('--ratio', '-o', type=float, default=0.8, help='The ratio of len(samples in x) / len(samples in y)')
 
     args = parser.parse_args()
 

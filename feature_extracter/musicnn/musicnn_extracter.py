@@ -22,7 +22,7 @@ import argparse
 
 # raw music file folder
 in_folder = 'dataset/base/music'
-out_folder = 'dataset/base/musicnn_features_msd'
+out_folder = 'dataset/base/musicnn_features'
 
 # file_name = './audio/joram-moments_of_clarity-08-solipsism-59-88.mp3'
 # file_name = './audio/TRWJAZW128F42760DD_test.mp3'

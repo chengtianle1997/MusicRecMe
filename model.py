@@ -133,6 +133,7 @@ class MusicRecommender(object):
         ground_truth_num = 0
         top_10_track_list = []
         ap_list = []
+        ndcg_list = []
         # top_10_track_mat = [batch_size, 10, embed_dim]
         top_10_track_mat = torch.zeros((user_embed.shape[0], 10, self.song_mat.shape[1])).to(self.device)
         # iterate through users
@@ -165,14 +166,17 @@ class MusicRecommender(object):
             ground_truth_num += len(gt_set)
             # get ap
             ap_list.append(get_ap(y_valid_tracks[i], top_k_track))
+            # get ndcg
+            ndcg_list.append(get_ndcg(y_valid_tracks[i], top_k_track))
         
         recalls = [top_10_recall_num / ground_truth_num, top_50_recall_num / ground_truth_num, \
             top_100_recall_num / ground_truth_num]
         
         mean_avg_prec = sum(ap_list) / len(ap_list)
+        mean_ndcg = sum(ndcg_list) / len(ndcg_list)
 
         if return_songs is True:
-            return top_10_track_list, top_10_track_mat, recalls, mean_avg_prec
+            return top_10_track_list, top_10_track_mat, recalls, [mean_avg_prec, mean_ndcg]
         else:
             # calculate recall rate
             return recalls, mean_avg_prec
@@ -213,6 +217,51 @@ class SequenceEmbedLoss(nn.Module):
         #return torch.sqrt(loss)
         #return torch.log(loss)
         return loss
+
+class SequenceCrossEntropyLoss(nn.Module):
+    def __init__(self, dataset, device, model=None, mode='train'):
+        super().__init__()
+        self.loss = nn.CrossEntropyLoss()
+        self.device= device
+        if mode == 'train':
+            self.song_mat = torch.tensor(dataset.train_song_mat).to(device)
+        else:
+            self.song_mat = torch.tensor(dataset.test_song_mat).to(device)
+        self.model = model
+        self.song_dim = self.song_mat.shape[0]
+        self.cos_sim = nn.CosineSimilarity(dim=1)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, pred, x_inv, y):
+        need_max_seq = True
+        # fit for non-sequence user embeddings
+        if len(pred.shape) < 3:
+            pred = pred.reshape(pred.shape[0], 1, pred.shape[1])
+            need_max_seq = False
+        
+        batch_size, seq_x_len, embed_dim = \
+             pred.shape[0], pred.shape[1], pred.shape[2]
+
+        # iterate through user embeddings
+        similarity = torch.zeros(batch_size, self.song_mat.shape[0], seq_x_len).to(self.device)
+        # iterate through users
+        for i in range(batch_size):
+            for j in range(seq_x_len):
+                # similarity = [batch_size, song_num, x_len]
+                similarity[i, :, j] = self.cos_sim(self.song_mat, pred[i, j, :].reshape(1, pred.shape[2]))
+        # similarity = [batch_size, song_num, 1]
+        if need_max_seq:
+            similarity = torch.max(similarity, dim=2)[0]
+        else:
+            similarity = similarity.reshape(batch_size, -1)
+        similarity = similarity * x_inv
+        # calculate cross entropy loss
+        # similarity = (similarity + 1.) / 2.
+        similarity = self.softmax(similarity)
+        y = self.softmax(y)
+        loss = self.loss(similarity, y)
+        return loss
+
 
 def get_recalls(gt, top_k_track):
     gt_set = set(gt)
@@ -484,6 +533,7 @@ class UserAttention(nn.Module):
         # de-embed
         if self.re_embed is True:
             self.de_embed = nn.Sequential(nn.ReLU(), nn.Linear(self.music_embed_dim, self.out_dim))
+    
     
     def forward(self, x, mask=None):
         # input x: [batch_size, seq_length, music_embed_dim]

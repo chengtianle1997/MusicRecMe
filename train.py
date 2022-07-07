@@ -22,15 +22,15 @@ import numpy as np
 batch_size = 50
 learning_rate = 1e-3
 early_stop_steps = 30 # early stopping triggered if over early_stop_steps no update
-loss_type = 'seq_cos' # 'cos' or 'rmse' or 'seq_cos'
-loss_type_list = ['rmse', 'cos', 'seq_cos']
+loss_type = 'cross_entropy' # 'cos' or 'rmse' or 'seq_cos'
+loss_type_list = ['rmse', 'cos', 'seq_cos', 'cross_entropy']
 seq_k = 10
 # about feature dimension
 use_music_embedding = False
 use_data_pca = True
 # about loss function
 include_x_loss = False
-include_neg_samples = True
+include_neg_samples = False
 # baseline without a model
 check_baseline = False
 
@@ -200,6 +200,8 @@ def train(args):
     else:
         x_train_len_list, y_train_len_list, x_train_tensor_list, y_train_tensor_list = \
             dataset.get_batched_data(train_data_list, batch_size=batch_size, fix_length=False)
+        if loss_type == 'cross_entropy':
+            x_train_onehot, x_train_inv_onehot, y_train_onehot = dataset.get_onehot_data(train_data_list)
         
     # there is no need to batch valid set, we avoid batching by setting batch_size = the size of valid set
     valid_data_list = dataset.get_data(set_tag='valid', neg_samp=include_neg_samples)
@@ -210,8 +212,12 @@ def train(args):
     else:
         x_valid_len_list, y_valid_len_list, x_valid_tensor_list, y_valid_tensor_list = \
             dataset.get_batched_data(valid_data_list, batch_size=valid_data_batch, fix_length=False)
+        if loss_type == 'cross_entropy':
+            x_valid_onehot, x_valid_inv_onehot, y_valid_onehot = dataset.get_onehot_data(valid_data_list, batch_size=valid_data_batch)
+
     train_len, valid_len = len(x_train_len_list) * batch_size, len(x_valid_len_list) * valid_data_batch
     log.print("{} playlists found (train: {}, valid: {})".format(train_len + valid_len, train_len, valid_len))
+    
     # get track id list for valid set
     x_valid_tracks = valid_data_list[2]
     y_valid_tracks = valid_data_list[3]
@@ -228,10 +234,12 @@ def train(args):
     mse_loss = nn.MSELoss(reduction='none') # do not calculate mean or sum
     cos_sim_loss = nn.CosineSimilarity(dim=2) # cosine similarity on embedding dimension
     seq_cos_loss = Model.SequenceEmbedLoss()
+    seq_cross_entroopy_loss = Model.SequenceCrossEntropyLoss(dataset, device)
     start_epoch = 0
     best_epoch = 0
     best_valid_loss = float('inf')
     best_recall_50 = 0
+
     # check if checkpoint exists
     sub_task_name = get_sub_task_name(args)
     checkpoint_final_path = work_folder + '/' + sub_task_name + '.pt'
@@ -284,6 +292,9 @@ def train(args):
             x_len = x_train_len_list[i]  # [batch_size]
             y = y_train_tensor_list[i].to(device)  # [batch_size, max_seq_len, music_embed_dim]
             y_len = y_train_len_list[i]
+            if loss_type == 'cross_entropy':
+                x_inv_oh = x_train_inv_onehot[i].to(device)
+                y_oh = y_train_onehot[i].to(device)
             if include_neg_samples:
                 y_neg_len = y_neg_train_len_list[i]
                 y_neg = y_neg_train_tensor_list[i].to(device)
@@ -314,7 +325,9 @@ def train(args):
                     # include negative samples in loss
                     neg_loss = seq_cos_loss(pred, y_neg, y_neg_mask, model=model if use_music_embedding else None, \
                         x=x if include_x_loss else None, x_mask=x_y_mask if include_x_loss else None)
-                    loss = loss - neg_loss*0.2
+                    loss = loss - neg_loss * 0.3
+            elif loss_type == 'cross_entropy':
+                loss = seq_cross_entroopy_loss(pred, x_inv_oh, y_oh)
             # back propagation
             if not check_baseline:
                 loss.backward()
@@ -327,6 +340,9 @@ def train(args):
         x_valid_len = x_valid_len_list[0]
         y_valid = y_valid_tensor_list[0].to(device)
         y_valid_len = y_valid_len_list[0]
+        if loss_type == 'cross_entropy':
+            x_valid_inv_oh = x_valid_inv_onehot[0].to(device)
+            y_valid_oh = y_valid_onehot[0].to(device)
         if include_neg_samples:
             y_neg_valid_len = y_neg_valid_len_list[0]
             y_neg_valid = y_neg_valid_tensor_list[0].to(device)
@@ -354,7 +370,9 @@ def train(args):
             if include_neg_samples:
                 valid_neg_loss = seq_cos_loss(pred_valid, y_neg_valid, y_neg_valid_mask, model=model if use_music_embedding else None, \
                     x=x_valid if include_x_loss else None, x_mask=x_y_valid_mask if include_x_loss else None)
-                valid_loss = valid_loss - valid_neg_loss*0.2
+                valid_loss = valid_loss - valid_neg_loss * 0.3
+        elif loss_type == 'cross_entropy':
+            valid_loss = seq_cross_entroopy_loss(pred_valid, x_valid_inv_oh, y_valid_oh)
         train_loss_epoch.append(train_loss_batch[-1])
         valid_loss_epoch.append(valid_loss.item())
         
@@ -372,6 +390,9 @@ def train(args):
         elif loss_type == 'seq_cos':
             top_track_loss = seq_cos_loss(top_10_track_mats, y_valid, y_valid_mask, \
                 model=model if use_music_embedding else None)
+        elif loss_type == 'cross_entropy':
+            top_track_loss = seq_cross_entroopy_loss(top_10_track_mats, x_valid_inv_oh, y_valid_oh)
+        
         top_track_loss_epoch.append(top_track_loss.item())
         log.print("[Epoch: {}] train loss: {}, valid loss: {}, MAP: {}, NDCG: {}, recalls: (@10: {}, @50: {}, @100: {})"\
             .format(epoch, train_loss_batch[-1], valid_loss, others[0], others[1], recalls[0], recalls[1], recalls[2]))

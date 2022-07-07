@@ -207,6 +207,34 @@ class Dataset(object):
         else:
             print("[Get Dict and Mat Err]: no {} set_tag found!".format(set_tag))
 
+    # get batched one-hot format data
+    def get_onehot_data(self, len_mat_res, batch_size=50, mode='train'):
+        x_len, y_len, x_mat, y_mat = len_mat_res[0], len_mat_res[1], len_mat_res[2], len_mat_res[3]
+        batch_num = int(len(x_len) / batch_size)
+        x_batch_list = []
+        x_inv_batch_list = []
+        y_batch_list = []
+        if mode == 'train':
+            song_dict = self.train_song_dict
+        else:
+            song_dict = self.test_song_dict
+        song_dict_dim = len(song_dict)
+        for batch_idx in range(batch_num):
+            x_batch = np.zeros((batch_size, song_dict_dim))
+            x_inv_batch = np.ones((batch_size, song_dict_dim))
+            y_batch = np.zeros((batch_size, song_dict_dim))
+            for row_idx in range(batch_size):
+                x_index = [song_dict[x] for x in x_mat[batch_idx * batch_size + row_idx]]
+                y_index = [song_dict[y] for y in y_mat[batch_idx * batch_size + row_idx]]
+                x_batch[row_idx, x_index] = 1
+                x_inv_batch[row_idx, x_index] = 0
+                y_batch[row_idx, y_index] = 1
+            x_batch_list.append(torch.tensor(x_batch))
+            x_inv_batch_list.append(torch.tensor(x_inv_batch))
+            y_batch_list.append(torch.tensor(y_batch))
+        return x_batch_list, x_inv_batch_list, y_batch_list
+
+
     # get batched train, valid, and test data in tensor format (music embedding inserted)
     # len_mat_res: return list from get_data() method
     # batch_size: batch size
@@ -233,7 +261,8 @@ class Dataset(object):
         for batch_idx in range(batch_num):
             x_len_list.append(x_len[batch_idx * batch_size: (batch_idx + 1) * batch_size])
             y_len_list.append(y_len[batch_idx * batch_size: (batch_idx + 1) * batch_size])
-            y_neg_len_list.append(y_neg_len[batch_idx * batch_size: (batch_idx + 1) * batch_size])
+            if neg_samp is True:
+                y_neg_len_list.append(y_neg_len[batch_idx * batch_size: (batch_idx + 1) * batch_size])
             if fix_length is True:
                 # pad the first sequence to disired length
                 x_mat[batch_idx * batch_size] = nn.ConstantPad2d\

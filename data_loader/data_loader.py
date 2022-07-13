@@ -153,7 +153,7 @@ class Dataset(object):
     # y_len: list of song numbers in y
     # x_mat: list of songs track ids in x
     # y_mat: list of songs track ids in y
-    def get_data(self, shuffle=True, set_tag='train', neg_samp=False):
+    def get_data(self, shuffle=True, set_tag='train', neg_samp=False, neg_pos_ratio=10):
         # training set
         if set_tag == 'train':
             if shuffle is True:
@@ -176,7 +176,7 @@ class Dataset(object):
             y_mat = [data['y'] for data in self.test_mat]
         # negative sampling
         if neg_samp is True:
-            y_neg_len, y_neg_mat = self.get_neg_data(x_mat, y_mat)
+            y_neg_len, y_neg_mat = self.get_neg_data(x_mat, y_mat, k=neg_pos_ratio)
             return [x_len, y_len, x_mat, y_mat, y_neg_len, y_neg_mat]
         else:
             return [x_len, y_len, x_mat, y_mat]

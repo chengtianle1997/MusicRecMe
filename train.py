@@ -24,7 +24,7 @@ from tqdm import tqdm
 batch_size = 50
 learning_rate = 1e-3
 early_stop_steps = 30 # early stopping triggered if over early_stop_steps no update
-loss_type = 'cross_entropy' # 'cos' or 'rmse' or 'seq_cos'
+loss_type = 'seq_cos' # 'cos' or 'rmse' or 'seq_cos'
 loss_type_list = ['rmse', 'cos', 'seq_cos', 'cross_entropy']
 seq_k = 10
 # about feature dimension
@@ -32,10 +32,13 @@ use_music_embedding = False
 use_data_pca = True
 # about loss function
 include_x_loss = False
-include_neg_samples = False
+include_neg_samples = True
+neg_loss_alpha = 0.5
+neg_pos_ratio = 10
 # baseline without a model
 check_baseline = False
-
+# using multi label cross entropy loss
+use_multi_label = False
 echo_nest_sub_path = 'dataset/echo_nest/sub_data'
 echo_nest_whole_path = 'dataset/echo_nest/data'
 
@@ -195,7 +198,7 @@ def train(args):
     log.print("music embed dim: {} [{}, {}, {}, {}]".format(music_embed_dim, music_embed_dim_list[0], \
         music_embed_dim_list[1], music_embed_dim_list[2], music_embed_dim_list[3]))
     # load train and valid set
-    train_data_list = dataset.get_data(set_tag='train', neg_samp=include_neg_samples)
+    train_data_list = dataset.get_data(set_tag='train', neg_samp=include_neg_samples, neg_pos_ratio=neg_pos_ratio)
     if include_neg_samples:
         x_train_len_list, y_train_len_list, x_train_tensor_list, y_train_tensor_list, y_neg_train_len_list, y_neg_train_tensor_list = \
             dataset.get_batched_data(train_data_list, batch_size=batch_size, fix_length=False, neg_samp=True)
@@ -209,7 +212,7 @@ def train(args):
     y_train_tracks = train_data_list[3]
     
     # there is no need to batch valid set, we avoid batching by setting batch_size = the size of valid set
-    valid_data_list = dataset.get_data(set_tag='valid', neg_samp=include_neg_samples)
+    valid_data_list = dataset.get_data(set_tag='valid', neg_samp=include_neg_samples, neg_pos_ratio=neg_pos_ratio)
     valid_data_batch =  len(valid_data_list[0])
     if include_neg_samples:
         x_valid_len_list, y_valid_len_list, x_valid_tensor_list, y_valid_tensor_list, y_neg_valid_len_list, y_neg_valid_tensor_list = \
@@ -239,7 +242,7 @@ def train(args):
     mse_loss = nn.MSELoss(reduction='none') # do not calculate mean or sum
     cos_sim_loss = nn.CosineSimilarity(dim=2) # cosine similarity on embedding dimension
     seq_cos_loss = Model.SequenceEmbedLoss()
-    seq_cross_entroopy_loss = Model.SequenceCrossEntropyLoss(dataset, device)
+    seq_cross_entroopy_loss = Model.SequenceCrossEntropyLoss(dataset, device, multi_label=use_multi_label)
     start_epoch = 0
     best_epoch = 0
     best_valid_loss = float('inf')
@@ -333,7 +336,7 @@ def train(args):
                     # include negative samples in loss
                     neg_loss = seq_cos_loss(pred, y_neg, y_neg_mask, model=model if use_music_embedding else None, \
                         x_mask=x_y_mask if include_x_loss else None)
-                    loss = loss - neg_loss * 0.2
+                    loss = loss - neg_loss * neg_loss_alpha
             elif loss_type == 'cross_entropy':
                 loss = seq_cross_entroopy_loss(pred, x_inv_oh, y_oh, model=model if use_music_embedding else None)
             # back propagation
@@ -387,7 +390,7 @@ def train(args):
             if include_neg_samples:
                 valid_neg_loss = seq_cos_loss(pred_valid, y_neg_valid, y_neg_valid_mask, model=model if use_music_embedding else None, \
                     x_mask=x_y_valid_mask if include_x_loss else None)
-                valid_loss = valid_loss - valid_neg_loss * 0.2
+                valid_loss = valid_loss - valid_neg_loss * neg_loss_alpha
         elif loss_type == 'cross_entropy':
             valid_loss = seq_cross_entroopy_loss(pred_valid, x_valid_inv_oh, y_valid_oh, model=model if use_music_embedding else None)
         train_loss_epoch.append(train_loss_batch[-1])
@@ -411,8 +414,8 @@ def train(args):
             top_track_loss = seq_cross_entroopy_loss(top_10_track_mats, x_valid_inv_oh, y_valid_oh, model=model if use_music_embedding else None)
         
         top_track_loss_epoch.append(top_track_loss.item())
-        log.print("[Epoch: {}] train loss: {}, valid loss: {}, MAP: {}, NDCG: {}, recalls: (@10: {}, @50: {}, @100: {})"\
-            .format(epoch, train_loss_batch[-1], valid_loss, others[0], others[1], recalls[0], recalls[1], recalls[2]))
+        log.print("[Epoch: {}] train loss: {}, valid loss: {} \nR-Prec: {}, NDCG: {}, Clicks: {} \nRecalls: (@10: {}, @50: {}, @100: {})"\
+            .format(epoch, train_loss_batch[-1], valid_loss, others[2], others[1], others[3], recalls[0], recalls[1], recalls[2]))
         
         # update visualizer
         opts = [batch_size, train_loss_batch, train_loss_epoch, valid_loss_epoch, recall_epoch, top_track_loss_epoch]

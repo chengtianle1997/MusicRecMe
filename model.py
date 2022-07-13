@@ -225,9 +225,13 @@ class SequenceEmbedLoss(nn.Module):
         return loss
 
 class SequenceCrossEntropyLoss(nn.Module):
-    def __init__(self, dataset, device, model=None, mode='train'):
+    def __init__(self, dataset, device, model=None, mode='train', multi_label=False):
         super().__init__()
-        self.loss = nn.CrossEntropyLoss()
+        self.multi_label = multi_label
+        if multi_label:
+            self.loss = torch.nn.BCELoss()
+        else:
+            self.loss = nn.CrossEntropyLoss()
         self.device= device
         if mode == 'train':
             self.song_mat_ori = torch.tensor(dataset.train_song_mat).to(device)
@@ -266,12 +270,21 @@ class SequenceCrossEntropyLoss(nn.Module):
         else:
             similarity = similarity.reshape(batch_size, -1)
         similarity = similarity * x_inv
+        #imilarity = similarity.type(torch.DoubleTensor).to(self.device)
         # calculate cross entropy loss
         # similarity = (similarity + 1.) / 2.
-        similarity = self.softmax(similarity)
-        y = self.softmax(y)
-        loss = self.loss(similarity, y)
-        return loss
+        if self.multi_label:
+            # for multi label: more than one song to predict in y
+            # using sigmoid instead of softmax
+            similarity = torch.sigmoid(similarity * 5)
+            loss = self.loss(similarity, y)
+            return loss
+        else:
+            # for single label: only one song to predict in y
+            similarity = self.softmax(similarity)
+            y = self.softmax(y)
+            loss = self.loss(similarity, y)
+            return loss
 
 
 def get_recalls(gt, top_k_track):
@@ -317,6 +330,21 @@ def get_ndcg(gt, top_k_track, k=10):
         if top_k_track[i] in gt:
             numi += 1 + inv_rank
     return numi / domi
+
+# calculate the R-precision
+def get_r_prec(gt, top_k_track):
+    num_gt = len(gt)
+    gt_set = set(gt)
+    rec_set = set(top_k_track[0:num_gt])
+    inter_set = gt_set & rec_set
+    return len(inter_set) / num_gt
+
+# calculate the clicks
+def get_clicks(gt, top_k_track):
+    for i in range(0, len(top_k_track)):
+        if top_k_track[i] in gt:
+            return (i - 1) / 10
+    return (len(top_k_track) - 1) / 10
 
 
 class MusicRecommenderSequenceEmbed(object):
@@ -370,6 +398,8 @@ class MusicRecommenderSequenceEmbed(object):
         top_10_track_list = []
         ap_list = []
         ndcg_list = []
+        r_prec_list = []
+        clicks_list = []
         # music embedding
         if model is not None:
             self.song_mat = model.module.music_embed(self.song_mat_ori)
@@ -405,6 +435,8 @@ class MusicRecommenderSequenceEmbed(object):
             recalls_num = get_recalls(y_valid_tracks[i], top_k_track)
             ap_list.append(get_ap(y_valid_tracks[i], top_k_track))
             ndcg_list.append(get_ndcg(y_valid_tracks[i], top_k_track))
+            r_prec_list.append(get_r_prec(y_valid_tracks[i], top_k_track))
+            clicks_list.append(get_clicks(y_valid_tracks[i], top_k_track))
             # gt_set = set(y_valid_tracks[i])
             # # top 10, 50, 100 recall
             # top_10_inter = set(top_k_track[0:10]) & gt_set
@@ -426,6 +458,8 @@ class MusicRecommenderSequenceEmbed(object):
 
         mean_avg_prec = sum(ap_list) / len(ap_list)
         mean_ndcg = sum(ndcg_list) / len(ndcg_list)
+        mean_r_prec = sum(r_prec_list) / len(r_prec_list)
+        mean_clicks = sum(clicks_list) / len(clicks_list)
 
         if return_songs is True:
             if self.mode == 'test':
@@ -438,10 +472,10 @@ class MusicRecommenderSequenceEmbed(object):
                 top_10_track_list, top_10_track_mat
                 return top_10_track_list, top_10_track_mat, recalls, recalls_old, recalls_new, mean_avg_prec
             else:
-                return top_10_track_list, top_10_track_mat, recalls, [mean_avg_prec, mean_ndcg]
+                return top_10_track_list, top_10_track_mat, recalls, [mean_avg_prec, mean_ndcg, mean_r_prec, mean_clicks]
         else:
-            # calculate recall rate
-            return recalls, [mean_avg_prec, mean_ndcg]
+            # return only the recall rate
+            return recalls, [mean_avg_prec, mean_ndcg, mean_r_prec, mean_clicks]
 
 class MultiheadAttention(nn.Module):
     # Multihead Attention

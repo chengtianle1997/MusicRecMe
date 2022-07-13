@@ -73,7 +73,7 @@ def get_cosine_sim_loss(cos_sim_loss, pred, y, y_mask, model=None, x=None, x_mas
     loss = (loss * y_mask).sum()
     valid_elements = y_mask.sum()
     #loss = torch.sqrt(loss / valid_elements)
-    #loss = loss / valid_elements
+    loss = loss / valid_elements
     return loss
 
 # input:
@@ -106,10 +106,10 @@ class MusicRecommender(object):
         self.device = device
         if mode == 'train':
             self.song_dict = dataset.train_song_dict
-            self.song_mat = torch.tensor(dataset.train_song_mat).to(device)
+            self.song_mat_ori = torch.tensor(dataset.train_song_mat).to(device)
         elif mode == 'test':
             self.song_dict = dataset.test_song_dict
-            self.song_mat = torch.tensor(dataset.test_song_mat).to(device)
+            self.song_mat_ori = torch.tensor(dataset.test_song_mat).to(device)
         # song_mat = [song_num, song_embed_dim]
         self.cos_sim = nn.CosineSimilarity(dim=1)
         # reverse song dict to find track by index
@@ -117,7 +117,7 @@ class MusicRecommender(object):
         # get music embedding
         if use_music_embedding is True and model is not None:
             self.model = model
-            self.song_mat = self.model.module.music_embed(self.song_mat)
+            #self.song_mat = self.model.module.music_embed(self.song_mat)
 
     
     # recommend songs according to cosine similarity (for multi-users at once)
@@ -126,7 +126,7 @@ class MusicRecommender(object):
     # y_valid_tracks []: ground truth track ids (not embeddings) [batch_size, seq_len]
     # return_songs: whether return recommended track ids or not
     # top_k: return top K recommended songs
-    def recommend(self, user_embed, x_valid_tracks, y_valid_tracks, return_songs=False, top_k=100):
+    def recommend(self, user_embed, x_valid_tracks, y_valid_tracks, model=None, return_songs=False, top_k=100):
         top_10_recall_num = 0
         top_50_recall_num = 0
         top_100_recall_num = 0
@@ -134,6 +134,12 @@ class MusicRecommender(object):
         top_10_track_list = []
         ap_list = []
         ndcg_list = []
+        # music embedding
+        if model is not None:
+            self.song_mat = model.module.music_embed(self.song_mat_ori)
+        else:
+            self.song_mat = self.song_mat_ori
+
         # top_10_track_mat = [batch_size, 10, embed_dim]
         top_10_track_mat = torch.zeros((user_embed.shape[0], 10, self.song_mat.shape[1])).to(self.device)
         # iterate through users
@@ -198,8 +204,8 @@ class SequenceEmbedLoss(nn.Module):
             y = torch.cat([y, x], dim=1)
             y_mask = torch.cat([y_mask, x_mask], dim=1)
         # music embedding
-        # if model is not None:
-        #     y = model.module.music_embed(y)
+        if model is not None:
+            y = model.module.music_embed(y)
         batch_size, seq_x_len, embed_dim = pred.shape[0], pred.shape[1], pred.shape[2]
         seq_y_len = y.shape[1]
         pred = pred.reshape(batch_size, seq_x_len, 1, embed_dim)
@@ -224,15 +230,15 @@ class SequenceCrossEntropyLoss(nn.Module):
         self.loss = nn.CrossEntropyLoss()
         self.device= device
         if mode == 'train':
-            self.song_mat = torch.tensor(dataset.train_song_mat).to(device)
+            self.song_mat_ori = torch.tensor(dataset.train_song_mat).to(device)
         else:
-            self.song_mat = torch.tensor(dataset.test_song_mat).to(device)
+            self.song_mat_ori = torch.tensor(dataset.test_song_mat).to(device)
         self.model = model
-        self.song_dim = self.song_mat.shape[0]
+        self.song_dim = self.song_mat_ori.shape[0]
         self.cos_sim = nn.CosineSimilarity(dim=1)
         self.softmax = nn.Softmax(dim=1)
 
-    def forward(self, pred, x_inv, y):
+    def forward(self, pred, x_inv, y, model=None):
         need_max_seq = True
         # fit for non-sequence user embeddings
         if len(pred.shape) < 3:
@@ -241,6 +247,11 @@ class SequenceCrossEntropyLoss(nn.Module):
         
         batch_size, seq_x_len, embed_dim = \
              pred.shape[0], pred.shape[1], pred.shape[2]
+
+        if model is not None:
+            self.song_mat = model.module.music_embed(self.song_mat_ori)
+        else:
+            self.song_mat = self.song_mat_ori
 
         # iterate through user embeddings
         similarity = torch.zeros(batch_size, self.song_mat.shape[0], seq_x_len).to(self.device)
@@ -301,10 +312,10 @@ def get_ndcg(gt, top_k_track, k=10):
     numi = 0
     domi = 0
     for i in range(k_ndcg):
-        inv_rank = 1 / math.log2(i + 1 + 1)
+        inv_rank = 1 + 1 / math.log2(i + 1 + 1)
         domi += inv_rank
         if top_k_track[i] in gt:
-            numi += inv_rank
+            numi += 1 + inv_rank
     return numi / domi
 
 
@@ -340,7 +351,7 @@ class MusicRecommenderSequenceEmbed(object):
     # y_valid_tracks []: ground truth track ids (not embeddings) [batch_size, seq_y_len]
     # return_songs: whether return recommended track ids or not
     # top_k: return top K recommended songs
-    def recommend(self, user_embed, x_valid_tracks, y_valid_tracks, return_songs=False, top_k=100):
+    def recommend(self, user_embed, x_valid_tracks, y_valid_tracks, return_songs=False, model=None, top_k=100):
         # get music embedding
         # if self.use_music_embedding is True and self.model is not None:
         #     self.song_mat = self.model.module.music_embed(self.song_mat_ori)
@@ -359,6 +370,11 @@ class MusicRecommenderSequenceEmbed(object):
         top_10_track_list = []
         ap_list = []
         ndcg_list = []
+        # music embedding
+        if model is not None:
+            self.song_mat = model.module.music_embed(self.song_mat_ori)
+        else:
+            self.song_mat = self.song_mat_ori
         # top_10_track_mat = [batch_size, 10, embed_dim]
         top_10_track_mat = torch.zeros((batch_size, 10, self.song_mat.shape[1])).to(self.device)
         # iterate through users
@@ -527,7 +543,8 @@ class UserAttention(nn.Module):
         self.ffn = nn.Sequential(
             nn.Linear(self.embed_dim, int(self.embed_dim / 2)),
             nn.ReLU(),
-            nn.Linear(int(self.embed_dim / 2), self.embed_dim)
+            nn.Linear(int(self.embed_dim / 2), self.embed_dim),
+            nn.ReLU()
         )
 
         # de-embed
@@ -597,7 +614,7 @@ class MusicEmbedding(nn.Module):
     '''
     Embedding for original music representation
     '''
-    def __init__(self, music_embed_dim, music_embed_dim_list, target_embed_dim_list=[200, 0, 200, 200], out_embed=100):
+    def __init__(self, music_embed_dim, music_embed_dim_list, target_embed_dim_list=[20, 0, 20, 20], out_embed=40):
         super().__init__()
         # take the original embedding dimension
         self.genre_in, self.meta_in, self.audio_in, self.lyric_in = \
@@ -622,7 +639,8 @@ class MusicEmbedding(nn.Module):
         self.out_ffn = nn.Sequential(
             nn.Linear(self.embed_out_dim, int(self.embed_out_dim /2)), 
             nn.ReLU(),
-            nn.Linear(int(self.embed_out_dim /2), self.out_dim)
+            nn.Linear(int(self.embed_out_dim /2), self.out_dim),
+            nn.ReLU()
             )
         
     def forward(self, music_embed):

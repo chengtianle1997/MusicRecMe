@@ -27,6 +27,7 @@ song_old_new_dict_name = 'song_old_new_dict.npy'
 genre_dict_name = 'genre_dict.npy' # for a genre tag list with index for genre matrix
 genre_mat_name = 'genre_mat.npy'
 meta_mat_name = 'meta_mat.npy'
+one_hot_mat_name = 'one_hot_mat.npy'
 # other feature mat named as: {}_mat.npy, such as: musicnn_mat.npy
 
 meta_dict = {'key': 0, 'tempo': 1, 'energy': 2, 'valence': 3, 'liveness': 4, 'loudness': 5, \
@@ -181,7 +182,7 @@ class Dataset(object):
             return [x_len, y_len, x_mat, y_mat]
     
     # get negative samples randomly from other songs
-    def get_neg_data(self, x_mat, y_mat, k=3):
+    def get_neg_data(self, x_mat, y_mat, k=10):
         all_set = set(self.song_dict.keys())
         y_neg_mat = []
         y_neg_len = []
@@ -214,7 +215,7 @@ class Dataset(object):
         x_batch_list = []
         x_inv_batch_list = []
         y_batch_list = []
-        if mode == 'train':
+        if mode == 'train' or mode == 'valid':
             song_dict = self.train_song_dict
         else:
             song_dict = self.test_song_dict
@@ -337,7 +338,11 @@ class Dataset(object):
                 data_x = data['x']
                 data_y = data['y']
                 data_x_n = [track['track_id'] for track in data_x]
-                data_y_n = [track['track_id'] for track in data_y]
+                # single y for prediction in training set
+                if type(data_y) is dict:
+                    data_y_n = [data_y['track_id']]
+                else:
+                    data_y_n = [track['track_id'] for track in data_y]
                 data_mat.append({'x': data_x_n, 'y': data_y_n})
         print("{} data loaded: {}".format(set_tag, len(data_mat)))
         # save to cache file

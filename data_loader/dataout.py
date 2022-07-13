@@ -9,6 +9,7 @@ import json
 import langTag
 import datetime
 import argparse
+import random
 
 # Init database
 db = musicdb.MusicDB()
@@ -646,6 +647,360 @@ def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_g
 
     return
 
+# generate json file from echo nest filter table
+# training set:
+# x: a sequence of songs in a playlist
+# y: the song belongs to that playlist
+def generate_single_dataset(dataset_root, database='musicdbn', line_num=None, old_new_gap='2008-01-01', sub=True, x_y_ratio=0.5, rand_y_num=20):
+    # use the previous dataset
+    db = musicdb.MusicDB(database)
+    # set path to each folder
+    music_path = dataset_root + '/' + _music_path
+    lyric_path = dataset_root + '/' + _lyric_path
+    out_path = dataset_root + '/'
+    if sub is True:
+        out_path += echo_nest_sub_path
+    else:
+        out_path += echo_nest_whole_path
+    # train, valid and test folder
+    train_path = out_path + '/train'
+    valid_path = out_path + '/valid'
+    test_path = out_path + '/test'
+    if not os.path.exists(train_path):
+        os.makedirs(train_path)
+    if not os.path.exists(valid_path):
+        os.makedirs(valid_path)
+    if not os.path.exists(test_path):
+        os.makedirs(test_path)
+
+    # song table
+    song_json_url = out_path + '/song.json'
+    song_json_train_url = out_path + '/train_song.json'
+    song_json_test_url = out_path + '/test_song.json'
+    # song json: key -> track id, value -> song dict, including tracks in train, valid and test set
+    song_json = {}
+    jsonf = None
+    try:
+        jsonf = open(song_json_url)
+    except:
+        print("Fatal: Cannot open song json file {}, try to Create one!".format(song_json_url))
+        open(song_json_url, 'w').close()
+    # load song json train
+    if jsonf is not None:
+        try:
+            song_json = json.load(jsonf)
+        except:
+
+            print("No song json data from file: {}".format(song_json_url))
+    # song json train: key -> track id, value -> song dict, including tracks in train and valid set
+    song_json_train = {}
+    jsonf_train = None
+    try:
+        jsonf_train = open(song_json_train_url)
+    except:
+        print("Fatal: Cannot open song json file {}, try to Create one!".format(song_json_train_url))
+        open(song_json_train_url, 'w').close()
+    # load song json train
+    if jsonf_train is not None:
+        try:
+            song_json_train = json.load(jsonf_train)
+        except:
+
+            print("No song json data from file: {}".format(song_json_train_url))
+    # song json test: key -> track id, value -> song dict, including tracks in test set
+    song_json_test = {}
+    jsonf_test = None
+    try:
+        jsonf_test = open(song_json_test_url)
+    except:
+        print("Fatal: Cannot open song json file {}, try to create one!".format(song_json_test_url))
+        open(song_json_test_url, 'w').close()
+    # load song json test
+    if jsonf_test is not None:
+        try:
+            song_json_test = json.load(jsonf_test)
+        except:
+            print("No song json data from file: {}".format(song_json_test_url))
+    
+    # init counter
+    start_line = 0
+    line_counter = 0
+    line_valid_counter = 0
+    # get the line number
+    if line_num is None:
+        line_num = db.read_echo_nest_filter_count(MIN_LENGTH_OLD)
+    # calculate train, valid, test distribution
+    train_num = int(line_num * 0.8)
+    valid_num = int(line_num * 0.1)
+    test_num = line_num - train_num - valid_num
+    # init train, valid, test json
+    train_json = data_json(train_path, identifier='train')
+    valid_json = data_json(valid_path, identifier='valid')
+    test_json = data_json(test_path, identifier='test')
+    # start from the last progress
+    #line_valid_counter = train_json.exist_num() + valid_json.exist_num() + test_json.exist_num()
+    #start_line = line_valid_counter
+    # set processing bar
+    pbar = tqdm(total=line_num)
+    # start generating, line_num is None means read all data from the table
+    while line_valid_counter < line_num:
+        # read rows from echo nest filter table
+        rows = db.read_echo_nest_filter_sorted(start_line, MAX_LINE_LIMIT, MIN_LENGTH_OLD)
+        if rows is None:
+            break
+        start_line += MAX_LINE_LIMIT
+        for row in rows:
+            # # make sure it has more than 5 old song
+            # if not row['old'] >= MIN_LENGTH_OLD:
+            #     line_counter += 1 
+            #     continue
+            # read one playlist, re-arrange it
+            playlist = json.loads(row['playlist'])
+            # filter playlist less than 20 songs
+            if len(playlist) < 20:
+                continue
+            playlist, end_pos = arrange_playlist(playlist, old_new_gap)
+            # filter playlist with less than 10 old songs
+            if end_pos < 9:
+                continue
+            # insert the playlist to json file
+            # For training data
+            if line_valid_counter < train_num:
+                rand_idx = random.sample(range(end_pos + 1), min(rand_y_num, end_pos + 1))
+                for idx in rand_idx:
+                    res_dict = {}
+                    res_dict['x'] = [playlist[x] for x in range(0, end_pos + 1) if not x == idx]
+                    res_dict['y'] = playlist[idx]
+                    train_json.insert(res_dict)
+                # save songs to song json train
+                for song in playlist[0: end_pos + 1]:
+                    if not song['track_id'] in song_json_train.keys():
+                        song_json_train[song['track_id']] = song
+                #save_song_json(song_json_train_url, song_json_train)
+
+            elif line_valid_counter >= train_num and line_valid_counter < train_num + valid_num:
+                if line_valid_counter == train_num:
+                    # save the last train json
+                    train_json.save()
+                res_dict = {}
+                res_dict['x'] = playlist[0: int(x_y_ratio * end_pos)]
+                res_dict['y'] = playlist[int(x_y_ratio * end_pos): end_pos + 1]
+                valid_json.insert(res_dict)
+                # save songs to song json train
+                for song in playlist[0: end_pos + 1]:
+                    if not song['track_id'] in song_json_train.keys():
+                        song_json_train[song['track_id']] = song
+                #save_song_json(song_json_train_url, song_json_train)
+
+            else:
+                if line_valid_counter == train_num + valid_num:
+                    # save the last valid json
+                    valid_json.save()
+                res_dict = {}
+                res_dict['x'] = playlist[0: int(x_y_ratio * end_pos)]
+                res_dict['y'] = playlist[int(x_y_ratio * end_pos):]
+                test_json.insert(res_dict)
+                # save songs to song json test
+                for song in playlist:
+                    if not song['track_id'] in song_json_test.keys():
+                        song_json_test[song['track_id']] = song
+                #save_song_json(song_json_test_url, song_json_test)
+            
+            line_valid_counter += 1
+            pbar.update(1)
+    
+    # merge train song json and test song json to generate song json for all
+    song_json = {**song_json_train, **song_json_test}
+
+    train_json.save()
+    valid_json.save()
+    test_json.save()
+
+    save_song_json(song_json_url, song_json)
+    save_song_json(song_json_train_url, song_json_train)
+    save_song_json(song_json_test_url, song_json_test)
+
+    return
+
+
+# generate json file from echo nest filter table
+# training set:
+# x: user id, music id
+# y: 0 or 1 (only 1 here, negative sampling in data loader)
+# validation and test set
+# x: user id
+# y: user id
+def generate_ovo_dataset(dataset_root, database='musicdbn', line_num=None, old_new_gap='2008-01-01', sub=True, x_y_ratio=0.5, rand_y_num=20):
+    # use the previous dataset
+    db = musicdb.MusicDB(database)
+    # set path to each folder
+    music_path = dataset_root + '/' + _music_path
+    lyric_path = dataset_root + '/' + _lyric_path
+    out_path = dataset_root + '/'
+    if sub is True:
+        out_path += echo_nest_sub_path
+    else:
+        out_path += echo_nest_whole_path
+    # train, valid and test folder
+    train_path = out_path + '/train'
+    valid_path = out_path + '/valid'
+    test_path = out_path + '/test'
+    if not os.path.exists(train_path):
+        os.makedirs(train_path)
+    if not os.path.exists(valid_path):
+        os.makedirs(valid_path)
+    if not os.path.exists(test_path):
+        os.makedirs(test_path)
+
+    # song table
+    song_json_url = out_path + '/song.json'
+    song_json_train_url = out_path + '/train_song.json'
+    song_json_test_url = out_path + '/test_song.json'
+    # song json: key -> track id, value -> song dict, including tracks in train, valid and test set
+    song_json = {}
+    jsonf = None
+    try:
+        jsonf = open(song_json_url)
+    except:
+        print("Fatal: Cannot open song json file {}, try to Create one!".format(song_json_url))
+        open(song_json_url, 'w').close()
+    # load song json train
+    if jsonf is not None:
+        try:
+            song_json = json.load(jsonf)
+        except:
+
+            print("No song json data from file: {}".format(song_json_url))
+    # song json train: key -> track id, value -> song dict, including tracks in train and valid set
+    song_json_train = {}
+    jsonf_train = None
+    try:
+        jsonf_train = open(song_json_train_url)
+    except:
+        print("Fatal: Cannot open song json file {}, try to Create one!".format(song_json_train_url))
+        open(song_json_train_url, 'w').close()
+    # load song json train
+    if jsonf_train is not None:
+        try:
+            song_json_train = json.load(jsonf_train)
+        except:
+
+            print("No song json data from file: {}".format(song_json_train_url))
+    # song json test: key -> track id, value -> song dict, including tracks in test set
+    song_json_test = {}
+    jsonf_test = None
+    try:
+        jsonf_test = open(song_json_test_url)
+    except:
+        print("Fatal: Cannot open song json file {}, try to create one!".format(song_json_test_url))
+        open(song_json_test_url, 'w').close()
+    # load song json test
+    if jsonf_test is not None:
+        try:
+            song_json_test = json.load(jsonf_test)
+        except:
+            print("No song json data from file: {}".format(song_json_test_url))
+    
+    # init counter
+    start_line = 0
+    line_counter = 0
+    line_valid_counter = 0
+    # get the line number
+    if line_num is None:
+        line_num = db.read_echo_nest_filter_count(MIN_LENGTH_OLD)
+    # calculate train, valid, test distribution
+    train_num = int(line_num * 0.8)
+    valid_num = int(line_num * 0.1)
+    test_num = line_num - train_num - valid_num
+    # init train, valid, test json
+    train_json = data_json(train_path, identifier='train')
+    valid_json = data_json(valid_path, identifier='valid')
+    test_json = data_json(test_path, identifier='test')
+    # start from the last progress
+    #line_valid_counter = train_json.exist_num() + valid_json.exist_num() + test_json.exist_num()
+    #start_line = line_valid_counter
+    # set processing bar
+    pbar = tqdm(total=line_num)
+    # start generating, line_num is None means read all data from the table
+    while line_valid_counter < line_num:
+        # read rows from echo nest filter table
+        rows = db.read_echo_nest_filter_sorted(start_line, MAX_LINE_LIMIT, MIN_LENGTH_OLD)
+        if rows is None:
+            break
+        start_line += MAX_LINE_LIMIT
+        for row in rows:
+            # # make sure it has more than 5 old song
+            # if not row['old'] >= MIN_LENGTH_OLD:
+            #     line_counter += 1 
+            #     continue
+            # read one playlist, re-arrange it
+            user_id = row['user_id']
+            playlist = json.loads(row['playlist'])
+            # filter playlist less than 20 songs
+            if len(playlist) < 20:
+                continue
+            playlist, end_pos = arrange_playlist(playlist, old_new_gap)
+            # filter playlist with less than 10 old songs
+            if end_pos < 9:
+                continue
+            # insert the playlist to json file
+            # For training data
+            if line_valid_counter < train_num:
+                rand_idx = random.sample(range(end_pos + 1), min(rand_y_num, end_pos + 1))
+                for idx in rand_idx:
+                    res_dict = {}
+                    res_dict['x'] = [playlist[x] for x in range(0, end_pos + 1) if not x == idx]
+                    res_dict['y'] = playlist[idx]
+                    train_json.insert(res_dict)
+                # save songs to song json train
+                for song in playlist[0: end_pos + 1]:
+                    if not song['track_id'] in song_json_train.keys():
+                        song_json_train[song['track_id']] = song
+                #save_song_json(song_json_train_url, song_json_train)
+
+            elif line_valid_counter >= train_num and line_valid_counter < train_num + valid_num:
+                if line_valid_counter == train_num:
+                    # save the last train json
+                    train_json.save()
+                res_dict = {}
+                res_dict['x'] = playlist[0: int(x_y_ratio * end_pos)]
+                res_dict['y'] = playlist[int(x_y_ratio * end_pos): end_pos + 1]
+                valid_json.insert(res_dict)
+                # save songs to song json train
+                for song in playlist[0: end_pos + 1]:
+                    if not song['track_id'] in song_json_train.keys():
+                        song_json_train[song['track_id']] = song
+                #save_song_json(song_json_train_url, song_json_train)
+
+            else:
+                if line_valid_counter == train_num + valid_num:
+                    # save the last valid json
+                    valid_json.save()
+                res_dict = {}
+                res_dict['x'] = playlist[0: int(x_y_ratio * end_pos)]
+                res_dict['y'] = playlist[int(x_y_ratio * end_pos):]
+                test_json.insert(res_dict)
+                # save songs to song json test
+                for song in playlist:
+                    if not song['track_id'] in song_json_test.keys():
+                        song_json_test[song['track_id']] = song
+                #save_song_json(song_json_test_url, song_json_test)
+            
+            line_valid_counter += 1
+            pbar.update(1)
+    
+    # merge train song json and test song json to generate song json for all
+    song_json = {**song_json_train, **song_json_test}
+
+    train_json.save()
+    valid_json.save()
+    test_json.save()
+
+    save_song_json(song_json_url, song_json)
+    save_song_json(song_json_train_url, song_json_train)
+    save_song_json(song_json_test_url, song_json_test)
+
+    return
 
 
 
@@ -679,9 +1034,9 @@ if __name__ == '__main__':
                 valid_echo_nest(args.root, old_new_gap=args.thres, line_num=line_count, sub=False)
         elif args.gen:
             if args.sub:
-                generate_dataset(args.root, old_new_gap=args.thres, line_num=line_count, sub=True)
+                generate_ovo_dataset(args.root, old_new_gap=args.thres, line_num=line_count, sub=True)
             else:
-                generate_dataset(args.root, old_new_gap=args.thres, line_num=line_count, sub=False)
+                generate_ovo_dataset(args.root, old_new_gap=args.thres, line_num=line_count, sub=False)
         else:
             print("You are supposed to specify the mode -v or -g, to validate and generate the dataset")
             print("Note: Rememeber to validate (-v) first, and then generate (-g)!")

@@ -29,7 +29,7 @@ loss_type_list = ['rmse', 'cos', 'seq_cos', 'cross_entropy']
 seq_k = 10
 # about feature dimension
 use_music_embedding = False
-use_data_pca = True
+use_data_pca = False
 # about loss function
 include_x_loss = False
 include_neg_samples = True
@@ -38,7 +38,7 @@ neg_pos_ratio = 10
 # baseline without a model
 check_baseline = False
 # using multi label cross entropy loss
-use_multi_label = False
+use_multi_label = True
 echo_nest_sub_path = 'dataset/echo_nest/sub_data'
 echo_nest_whole_path = 'dataset/echo_nest/data'
 
@@ -123,13 +123,13 @@ def update_visualizer(vis, opts):
         name='Valid',
         update='append',
     )
-    vis.line(
-        X=[i for i in range(len(top_track_loss))],
-        Y=top_track_loss,
-        win='train_valid_loss',
-        name='Recom',
-        update='append',
-    )
+    # vis.line(
+    #     X=[i for i in range(len(top_track_loss))],
+    #     Y=top_track_loss,
+    #     win='train_valid_loss',
+    #     name='Recom',
+    #     update='append',
+    # )
     # draw recall lines
     recall_epoch_np = np.array(recall_epoch)
     recall_10 = recall_epoch_np[:, 0]
@@ -191,8 +191,8 @@ def train(args):
     
     # load training data
     dataset = data_loader.Dataset(dataset_root='E:', sub=args.sub, genre=args.gen, meta=args.meta, \
-        audio=args.audio, lyric=args.lyric, outdir=cache_folder, \
-            dim_list=[0, 0, 0, 0] if use_music_embedding or not use_data_pca else [0, 0, 200, 200])
+        audio=args.audio, lyric=args.lyric, outdir=cache_folder, dim_list=[0, 0, 200, 0])
+        #    dim_list=[0, 0, 0, 0] if use_music_embedding or not use_data_pca else [0, 0, 200, 200])
     music_embed_dim, music_embed_dim_list = dataset.get_dim()
     log.print("dataset loaded:")
     log.print("music embed dim: {} [{}, {}, {}, {}]".format(music_embed_dim, music_embed_dim_list[0], \
@@ -213,7 +213,8 @@ def train(args):
     
     # there is no need to batch valid set, we avoid batching by setting batch_size = the size of valid set
     valid_data_list = dataset.get_data(set_tag='valid', neg_samp=include_neg_samples, neg_pos_ratio=neg_pos_ratio)
-    valid_data_batch =  len(valid_data_list[0])
+    # valid_data_batch =  len(valid_data_list[0])
+    valid_data_batch = batch_size
     if include_neg_samples:
         x_valid_len_list, y_valid_len_list, x_valid_tensor_list, y_valid_tensor_list, y_neg_valid_len_list, y_neg_valid_tensor_list = \
             dataset.get_batched_data(valid_data_list, batch_size=valid_data_batch, fix_length=False, neg_samp=True)
@@ -236,7 +237,7 @@ def train(args):
         exit
     # load model
     model = Model.UserAttention(music_embed_dim, music_embed_dim_list, num_heads=args.head, \
-        return_seq=True if loss_type=='seq_cos' else False, seq_k=seq_k, re_embed=use_music_embedding, \
+        return_seq=True if loss_type=='seq_cos' or 'cross_entropy' else False, seq_k=seq_k, re_embed=use_music_embedding, \
         check_baseline=check_baseline)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     mse_loss = nn.MSELoss(reduction='none') # do not calculate mean or sum
@@ -267,12 +268,12 @@ def train(args):
     model = model.to(device)
     optimizer_to(optimizer, device)
 
-    # load recommender
-    if loss_type == 'seq_cos':
+    # load recommender: move to cpu to calculate due to limited cuda memory
+    if loss_type == 'seq_cos' or 'cross_entropy':
         recommender = Model.MusicRecommenderSequenceEmbed(dataset, device, mode='train', \
             model=model, use_music_embedding=use_music_embedding)
     else:
-        recommender = Model.MusicRecommender(dataset, device, mode='train', model=model, \
+        recommender = Model.MusicRecommender(dataset, device, model=model, \
             use_music_embedding=use_music_embedding)
 
     # loss recorder
@@ -339,10 +340,13 @@ def train(args):
                     loss = loss - neg_loss * neg_loss_alpha
             elif loss_type == 'cross_entropy':
                 loss = seq_cross_entroopy_loss(pred, x_inv_oh, y_oh, model=model if use_music_embedding else None)
+            
+            torch.cuda.empty_cache()
             # back propagation
             if not check_baseline:
                 loss.backward()
                 optimizer.step()
+            
             train_loss_batch.append(loss.item())
             # log.print("Epoch: {}, Batch: {}, train loss: {}".format(epoch, i, loss.item()))
             # top_10_track_ids, top_10_track_mats, recalls, others = recommender.recommend(pred, x_train_tracks[batch_size * i : batch_size * (i + 1)], y_train_tracks[batch_size * i : batch_size * (i + 1)], return_songs=True)
@@ -354,66 +358,89 @@ def train(args):
         # log.print("Recall for training set: @10: {}, @50: {}, @100: {}".format(recalls_train[0], recalls_train[1], recalls_train[2]))
         
         # valid 
-        x_valid = x_valid_tensor_list[0].to(device)
-        x_valid_len = x_valid_len_list[0]
-        y_valid = y_valid_tensor_list[0].to(device)
-        y_valid_len = y_valid_len_list[0]
-        if loss_type == 'cross_entropy':
-            x_valid_inv_oh = x_valid_inv_onehot[0].to(device)
-            y_valid_oh = y_valid_onehot[0].to(device)
-        if include_neg_samples:
-            y_neg_valid_len = y_neg_valid_len_list[0]
-            y_neg_valid = y_neg_valid_tensor_list[0].to(device)
-            y_neg_valid_mask = Model.generate_out_mask(y_neg_valid_len).to(device)
-        # generate mask for attention
-        x_valid_mask = Model.generate_mask(x_valid_len).to(device)
-        # generate mask for y to calculate loss
-        y_valid_mask = Model.generate_out_mask(y_valid_len).to(device)
-        x_y_valid_mask = Model.generate_out_mask(x_valid_len).to(device)
-        # prediction
-        model.eval()
-        pred_valid = model(x_valid, x_valid_mask) 
-        # calculate valid loss
-        if loss_type == 'rmse':
-            valid_loss = Model.get_rmse_loss(mse_loss, pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None, \
-                x=x_valid if include_x_loss else None, x_mask=x_y_valid_mask if include_x_loss else None)
-        elif loss_type == 'cos':
-            if not include_neg_samples:
-                valid_loss = Model.get_cosine_sim_loss(cos_sim_loss, pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None, \
-                    x=x_valid if include_x_loss else None, x_mask=x_y_valid_mask if include_x_loss else None)
-            else:
-                valid_loss = Model.get_mix_cosine_sim_loss(cos_sim_loss, pred_valid, y_valid, y_valid_mask, y_neg_valid, model=model if use_music_embedding else None, \
-                    x=x_valid if include_x_loss else None, x_mask=x_y_valid_mask if include_x_loss else None)
-        elif loss_type == 'seq_cos':
-            valid_loss = seq_cos_loss(pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None, \
-                    x=x_valid if include_x_loss else None, x_mask=x_y_valid_mask if include_x_loss else None)
+        valid_loss_list = []
+        top_track_loss_list = []
+        recalls_list = []
+        others_list = []
+        for i in tqdm(range(len(x_valid_tensor_list))):
+            x_valid = x_valid_tensor_list[i].to(device)
+            x_valid_len = x_valid_len_list[i]
+            y_valid = y_valid_tensor_list[i].to(device)
+            y_valid_len = y_valid_len_list[i]
+            if loss_type == 'cross_entropy':
+                x_valid_inv_oh = x_valid_inv_onehot[i].to(device)
+                y_valid_oh = y_valid_onehot[i].to(device)
             if include_neg_samples:
-                valid_neg_loss = seq_cos_loss(pred_valid, y_neg_valid, y_neg_valid_mask, model=model if use_music_embedding else None, \
-                    x_mask=x_y_valid_mask if include_x_loss else None)
-                valid_loss = valid_loss - valid_neg_loss * neg_loss_alpha
-        elif loss_type == 'cross_entropy':
-            valid_loss = seq_cross_entroopy_loss(pred_valid, x_valid_inv_oh, y_valid_oh, model=model if use_music_embedding else None)
-        train_loss_epoch.append(train_loss_batch[-1])
-        valid_loss_epoch.append(valid_loss.item())
-        
-        # recommendation
-        top_10_track_ids, top_10_track_mats, recalls, others = recommender.recommend(pred_valid, x_valid_tracks, y_valid_tracks, model=model if use_music_embedding else None, return_songs=True)
-        #top_10_track_ids, top_10_track_mats, recalls = recommender.recommend(pred_valid, x_valid_tracks, y_valid_tracks, return_songs=True)
+                y_neg_valid_len = y_neg_valid_len_list[i]
+                y_neg_valid = y_neg_valid_tensor_list[i].to(device)
+                y_neg_valid_mask = Model.generate_out_mask(y_neg_valid_len).to(device)
+            # generate mask for attention
+            x_valid_mask = Model.generate_mask(x_valid_len).to(device)
+            # generate mask for y to calculate loss
+            y_valid_mask = Model.generate_out_mask(y_valid_len).to(device)
+            x_y_valid_mask = Model.generate_out_mask(x_valid_len).to(device)
+            # prediction
+            model.eval()
+            pred_valid = model(x_valid, x_valid_mask) 
+            # calculate valid loss
+            if loss_type == 'rmse':
+                valid_loss = Model.get_rmse_loss(mse_loss, pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None, \
+                    x=x_valid if include_x_loss else None, x_mask=x_y_valid_mask if include_x_loss else None)
+            elif loss_type == 'cos':
+                if not include_neg_samples:
+                    valid_loss = Model.get_cosine_sim_loss(cos_sim_loss, pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None, \
+                        x=x_valid if include_x_loss else None, x_mask=x_y_valid_mask if include_x_loss else None)
+                else:
+                    valid_loss = Model.get_mix_cosine_sim_loss(cos_sim_loss, pred_valid, y_valid, y_valid_mask, y_neg_valid, model=model if use_music_embedding else None, \
+                        x=x_valid if include_x_loss else None, x_mask=x_y_valid_mask if include_x_loss else None)
+            elif loss_type == 'seq_cos':
+                valid_loss = seq_cos_loss(pred_valid, y_valid, y_valid_mask, model=model if use_music_embedding else None, \
+                        x=x_valid if include_x_loss else None, x_mask=x_y_valid_mask if include_x_loss else None)
+                if include_neg_samples:
+                    valid_neg_loss = seq_cos_loss(pred_valid, y_neg_valid, y_neg_valid_mask, model=model if use_music_embedding else None, \
+                        x_mask=x_y_valid_mask if include_x_loss else None)
+                    valid_loss = valid_loss - valid_neg_loss * neg_loss_alpha
+            elif loss_type == 'cross_entropy':
+                valid_loss = seq_cross_entroopy_loss(pred_valid, x_valid_inv_oh, y_valid_oh, model=model if use_music_embedding else None)
+            
+            valid_loss_list.append(valid_loss.item())
+
+            # recommendation
+            top_10_track_ids, top_10_track_mats, recalls, others = recommender.recommend(pred_valid, \
+                x_valid_tracks[i * batch_size: (i + 1)*batch_size], y_valid_tracks[i * batch_size: (i + 1)*batch_size], \
+                model=model if use_music_embedding else None, return_songs=True)
+            #top_10_track_ids, top_10_track_mats, recalls = recommender.recommend(pred_valid, x_valid_tracks, y_valid_tracks, return_songs=True)
+            recalls_list.append(recalls)
+            others_list.append(others)
+
+            # move mats back to cuda for loss calculation
+            # top_10_track_mats = top_10_track_mats.to(device)
+
+            # calculate loss for recommended tracks
+            if loss_type == 'rmse':
+                top_track_loss = Model.get_rmse_loss(mse_loss, top_10_track_mats[:, 0, :], \
+                    y_valid, y_valid_mask, model=model if use_music_embedding else None)
+            elif loss_type == 'cos':
+                top_track_loss = Model.get_cosine_sim_loss(cos_sim_loss, top_10_track_mats[:, 0, :], \
+                    y_valid, y_valid_mask, model=model if use_music_embedding else None)
+            elif loss_type == 'seq_cos':
+                top_track_loss = seq_cos_loss(top_10_track_mats, y_valid, y_valid_mask, \
+                    model=model if use_music_embedding else None)
+            elif loss_type == 'cross_entropy':
+                top_track_loss = seq_cross_entroopy_loss(top_10_track_mats, x_valid_inv_oh, y_valid_oh, model=model if use_music_embedding else None)
+
+            top_track_loss_list.append(top_track_loss.item())
+
+        # take the average among batches
+        valid_loss = sum(valid_loss_list) / len(valid_loss_list)
+        top_track_loss = sum(top_track_loss_list) / len(top_track_loss_list)
+        recalls = np.array(recalls_list).mean(axis=0)
+        others = np.array(others_list).mean(axis=0)
+
         recall_epoch.append(recalls)
-        # calculate loss for recommended tracks
-        if loss_type == 'rmse':
-            top_track_loss = Model.get_rmse_loss(mse_loss, top_10_track_mats[:, 0, :], \
-                y_valid, y_valid_mask, model=model if use_music_embedding else None)
-        elif loss_type == 'cos':
-            top_track_loss = Model.get_cosine_sim_loss(cos_sim_loss, top_10_track_mats[:, 0, :], \
-                y_valid, y_valid_mask, model=model if use_music_embedding else None)
-        elif loss_type == 'seq_cos':
-            top_track_loss = seq_cos_loss(top_10_track_mats, y_valid, y_valid_mask, \
-                model=model if use_music_embedding else None)
-        elif loss_type == 'cross_entropy':
-            top_track_loss = seq_cross_entroopy_loss(top_10_track_mats, x_valid_inv_oh, y_valid_oh, model=model if use_music_embedding else None)
-        
-        top_track_loss_epoch.append(top_track_loss.item())
+        train_loss_epoch.append(train_loss_batch[-1])
+        valid_loss_epoch.append(valid_loss)
+        top_track_loss_epoch.append(top_track_loss)
         log.print("[Epoch: {}] train loss: {}, valid loss: {} \nR-Prec: {}, NDCG: {}, Clicks: {} \nRecalls: (@10: {}, @50: {}, @100: {})"\
             .format(epoch, train_loss_batch[-1], valid_loss, others[2], others[1], others[3], recalls[0], recalls[1], recalls[2]))
         

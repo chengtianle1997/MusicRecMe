@@ -10,7 +10,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 
 # raw music file folder
 in_folder = 'dataset/base/lyric_raw'
-out_folder = 'dataset/base/tf_idf_features'
+out_folder = 'dataset/base/tf_idf_features_128'
 
 def extract_feature(in_folder, out_folder):
     try:
@@ -34,7 +34,7 @@ def extract_feature(in_folder, out_folder):
     in_set = in_set - inter_set
     in_set_list = list(in_set)
     # vectorizer
-    vectorizer = TfidfVectorizer(input='filename', max_features=4096)
+    vectorizer = TfidfVectorizer(input='filename', max_features=128)
     # fit
     # for test:
     # in_files = in_files[:10000]

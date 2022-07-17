@@ -190,8 +190,8 @@ class Dataset(object):
             in_set = set(x_mat[idx]) | set(y_mat[idx])
             other_set = list(all_set - in_set)
             # random sampling
-            y_neg_mat.append(random.sample(other_set, k * len(y_mat[idx])))
-            y_neg_len.append(k * len(y_mat[idx]))
+            y_neg_mat.append(random.sample(other_set, min(k * len(y_mat[idx]), 2000)))
+            y_neg_len.append(min(k * len(y_mat[idx]), 2000))
         return y_neg_len, y_neg_mat
 
     # get dict and matrix, set_tag = [None (for all songs), 'train', 'test']
@@ -570,6 +570,18 @@ class Dataset(object):
         # sum_of_dim = audio_mat.sum(axis=0)
         # audio_mat = audio_mat / sum_of_dim[np.newaxis, :]
         
+        # normalize the dim 0
+        # ptp = audio_mat.ptp(axis=0)
+        # mat_min = audio_mat.min(axis=0)
+        # ptp[ptp < 1e-9] = 1e-9
+        # audio_mat = audio_mat - mat_min / ptp[np.newaxis, :]
+
+        # normalize the whole block
+        # ptp = audio_mat.ptp()
+        # mat_min = audio_mat.min()
+        # ptp = 1e-9 if ptp < 1e-9 else ptp
+        # audio_mat = audio_mat - mat_min / ptp
+
         # normalize among dim 1 (final choice)
         ptp = audio_mat.ptp(axis=1)
         ptp[ptp < 1e-9] = 1e-9
@@ -638,10 +650,21 @@ class Dataset(object):
                     print("[Lyric feature]Unfound track No.{}: {}".format(unfound_track_counter, ori_track_id))
                     continue
             # normalize among dim 0
-            sum_of_dim = lyric_mat.sum(axis=0)
-            # replace zeros with epsilon
-            sum_of_dim[sum_of_dim < 1e-9] = 1e-9
-            lyric_mat = lyric_mat / sum_of_dim[np.newaxis, :]
+            # ptp = lyric_mat.ptp(axis=0)
+            # min_val = lyric_mat.min(axis=0)
+            # # replace zeros with epsilon
+            # ptp[ptp < 1e-9] = 1e-9
+            # lyric_mat = lyric_mat - min_val / ptp[np.newaxis, :]
+
+            # normalize among dim 1
+            ptp = lyric_mat.ptp(axis=1)
+            ptp[ptp < 1e-9] = 1e-9
+            ptp = np.reshape(ptp, (lyric_mat.shape[0], 1))
+            ptp = np.repeat(ptp, lyric_mat.shape[1], axis=1)
+            min_mat = np.reshape(lyric_mat.min(axis=1), (lyric_mat.shape[0], 1))
+            min_mat = np.repeat(min_mat, lyric_mat.shape[1], axis=1)
+            lyric_mat = (lyric_mat - min_mat) / ptp
+
             # save audio matrix to cache file
             np.save(lyric_mat_path, lyric_mat)
             return lyric_mat

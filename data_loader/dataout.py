@@ -16,7 +16,7 @@ db = musicdb.MusicDB()
 
 # Path to generated dataset
 echo_nest_sub_path = 'dataset/echo_nest/sub_data_new'
-echo_nest_whole_path = 'dataset/echo_nest/data'
+echo_nest_whole_path = 'dataset/echo_nest/data_new'
 
 # Path to raw dataset
 _music_path = 'dataset/base/music'
@@ -622,8 +622,13 @@ def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_g
                     # save the last valid json
                     valid_json.save()
                 res_dict = {}
-                res_dict['x'] = playlist[0: int(x_y_ratio * end_pos)]
-                res_dict['y'] = playlist[int(x_y_ratio * end_pos):]
+                # res_dict['x'] = playlist[0: int(x_y_ratio * end_pos)]
+                # res_dict['y'] = playlist[int(x_y_ratio * end_pos):]
+                # res_dict['x'] = playlist[0: int(0.5 * len(playlist))]
+                # res_dict['y'] = playlist[int(0.5 * len(playlist)):]
+                res_dict['x'] = playlist[0: int(2 * end_pos - len(playlist))]
+                res_dict['y'] = playlist[int(2 * end_pos - len(playlist)):]
+
                 test_json.insert(res_dict)
                 # save songs to song json test
                 for song in playlist:
@@ -1034,9 +1039,9 @@ if __name__ == '__main__':
                 valid_echo_nest(args.root, old_new_gap=args.thres, line_num=line_count, sub=False)
         elif args.gen:
             if args.sub:
-                generate_ovo_dataset(args.root, old_new_gap=args.thres, line_num=line_count, sub=True)
+                generate_dataset(args.root, old_new_gap=args.thres, line_num=line_count, sub=True)
             else:
-                generate_ovo_dataset(args.root, old_new_gap=args.thres, line_num=line_count, sub=False)
+                generate_dataset(args.root, old_new_gap=args.thres, line_num=line_count, sub=False)
         else:
             print("You are supposed to specify the mode -v or -g, to validate and generate the dataset")
             print("Note: Rememeber to validate (-v) first, and then generate (-g)!")

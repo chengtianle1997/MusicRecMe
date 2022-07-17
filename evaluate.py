@@ -15,6 +15,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from tqdm import tqdm
+
 import visdom
 import numpy as np
 
@@ -24,8 +26,8 @@ loss_type = 'seq_cos' # 'cos' or 'rmse' or 'seq_cos'
 loss_type_list = ['rmse', 'cos', 'seq_cos']
 seq_k = 10
 use_music_embedding = False
-include_x_loss = True
-use_data_pca = False
+include_x_loss = False
+use_data_pca = True
 check_baseline = False
 
 echo_nest_sub_path = 'dataset/echo_nest/sub_data'
@@ -77,7 +79,7 @@ def _evaluate(args, model, x_tensor_list, y_tensor_list, x_len_list, y_len_list,
     recalls_old_list = []
     recalls_new_list = []
     # iterate batches
-    for i, data in enumerate(x_tensor_list):
+    for i, data in tqdm(enumerate(x_tensor_list)):
         # get x and y
         x = x_tensor_list[i].to(device)
         x_len = x_len_list[i]
@@ -105,10 +107,10 @@ def _evaluate(args, model, x_tensor_list, y_tensor_list, x_len_list, y_len_list,
         ground_truth_ids_list += y_tracks
         # recommendation
         if mode == 'train':
-            top_10_track_ids, top_10_track_mats, recalls = \
+            top_10_track_ids, top_10_track_mats, recalls, others = \
                 recommender.recommend(pred, x_tracks, y_tracks, return_songs=True)
         elif mode == 'test':
-            top_10_track_ids, top_10_track_mats, recalls, recalls_old, recalls_new = \
+            top_10_track_ids, top_10_track_mats, recalls, recalls_old, recalls_new, others = \
                 recommender.recommend(pred, x_tracks, y_tracks, return_songs=True)
             recalls_new_list.append(recalls_new)
             recalls_old_list.append(recalls_old)
@@ -173,7 +175,7 @@ def evaluate(args):
     log = logger.logger(result_path, time=time_stamp)
     # load dataset
     dataset = data_loader.Dataset(dataset_root='E:', sub=args.sub, genre=args.gen, meta=args.meta, \
-        audio=args.audio, lyric=args.lyric, outdir=cache_folder, dim_list=[0, 0, 0, 0] if use_music_embedding or not use_data_pca else [64, 0, 128, 128])
+        audio=args.audio, lyric=args.lyric, outdir=cache_folder, dim_list=[0, 0, 200, 0] if use_music_embedding or not use_data_pca else [0, 0, 200, 200])
     music_embed_dim, music_embed_dim_list = dataset.get_dim()
     log.print("dataset loaded:")
     log.print("music embed dim: {} [{}, {}, {}, {}]".format(music_embed_dim, music_embed_dim_list[0], \

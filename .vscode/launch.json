@@ -55,7 +55,7 @@
                 // Train recommendation model: train.py ----------
                 "-e",
                 "-r", "E:",
-                "--sub",  // sub dataset for debugging and testing
+                //"--sub",  // sub dataset for debugging and testing
                 "--gen",
                 //"--meta",
                 "--audio", "musicnn",

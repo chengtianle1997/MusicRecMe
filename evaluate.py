@@ -134,12 +134,12 @@ def _evaluate(args, model, x_tensor_list, y_tensor_list, x_len_list, y_len_list,
     return res_dict
 
 # tag = 'valid' or 'test'
-def display_and_save(res_dict, log, result_path, tag='valid'):
+def display_and_save(res_dict, log, result_path, tag='valid', item_cold=False):
     log.print('-------Evaluation results for {} set-------'.format(tag))
     log.print('Loss: {}'.format(res_dict['loss']))
     log.print('Recalls (All): @10 {}, @50 {}, @100 {}'\
         .format(res_dict['recalls'][0], res_dict['recalls'][1], res_dict['recalls'][2]))
-    if tag == 'test':
+    if item_cold:
         log.print('Recalls (Old): @10 {}, @50 {}, @100 {}'\
             .format(res_dict['recalls_old'][0], res_dict['recalls_old'][1], res_dict['recalls_old'][2]))
         log.print('Recalls (New): @10 {}, @50 {}, @100 {}'\
@@ -182,21 +182,29 @@ def evaluate(args):
         music_embed_dim_list[1], music_embed_dim_list[2], music_embed_dim_list[3]))
     # load valid set
     valid_data_list = dataset.get_data(set_tag='valid')
-    valid_data_batch =  len(valid_data_list[0])
+    valid_data_batch =  args.batch
     x_valid_len_list, y_valid_len_list, x_valid_tensor_list, y_valid_tensor_list = \
         dataset.get_batched_data(valid_data_list, batch_size=valid_data_batch, fix_length=False)
     # load test set
-    test_data_list = dataset.get_data(set_tag='test')
-    test_data_batch =  len(test_data_list[0])
-    x_test_len_list, y_test_len_list, x_test_tensor_list, y_test_tensor_list = \
-        dataset.get_batched_data(test_data_list, batch_size=test_data_batch, fix_length=False)
-    valid_len, test_len = len(x_valid_len_list) * valid_data_batch, len(x_test_len_list) * test_data_batch
-    log.print("{} playlists found (valid: {}, test: {})".format(test_len + valid_len, valid_len, test_len))
+    test_data_dict = dataset.get_data(set_tag='test')
+    test_data_batch = args.batch
+    test_batched_data_dict = {}
+    x_test_tracks_dict = {}
+    y_test_tracks_dict = {}
+    for key in test_data_dict.keys():
+        x_test_len_list, y_test_len_list, x_test_tensor_list, y_test_tensor_list = \
+            dataset.get_batched_data(test_data_dict[key], batch_size=test_data_batch, fix_length=False)
+        test_batched_data_dict[key] = [x_test_len_list, y_test_len_list, x_test_tensor_list, y_test_tensor_list]
+        log.print("{} playlists found for {}".format(len(x_test_len_list) * test_data_batch, key))
+        x_test_tracks_dict[key] = test_data_dict[key][2]
+        y_test_tracks_dict[key] = test_data_dict[key][3]
+
+    valid_len = len(x_valid_len_list) * valid_data_batch
+    log.print("{} playlists found for valid".format(valid_len))
     # get track id list for valid and test set
     x_valid_tracks = valid_data_list[2]
     y_valid_tracks = valid_data_list[3]
-    x_test_tracks = test_data_list[2]
-    y_test_tracks = test_data_list[3]
+    
     # check loss type
     if loss_type not in loss_type_list:
         log.print("Cannot support loss function type: {}".format(loss_type))
@@ -240,11 +248,24 @@ def evaluate(args):
     valid_res = \
         _evaluate(args, model, x_valid_tensor_list, y_valid_tensor_list, x_valid_len_list, y_valid_len_list, \
             x_valid_tracks, y_valid_tracks, recommender_valid)
-    test_res = \
-        _evaluate(args, model, x_test_tensor_list, y_test_tensor_list, x_test_len_list, y_test_len_list, \
-            x_test_tracks, y_test_tracks, recommender_test)
     display_and_save(valid_res, log, result_path, tag='valid')
-    display_and_save(test_res, log, result_path, tag='test')
+    
+    # for test data
+    for key in test_batched_data_dict.keys():
+        
+        item_cold = False
+        if key in ['item_cold', 'user_item_cold']:
+            item_cold = True
+        
+        x_test_len_list, y_test_len_list, x_test_tensor_list, y_test_tensor_list = \
+            test_batched_data_dict[key][0], test_batched_data_dict[key][1], test_batched_data_dict[key][2], test_batched_data_dict[key][3]
+        x_test_tracks, y_test_tracks = x_test_tracks_dict[key], y_test_tracks_dict[key]
+        
+        test_res = \
+            _evaluate(args, model, x_test_tensor_list, y_test_tensor_list, x_test_len_list, y_test_len_list, \
+                x_test_tracks, y_test_tracks, recommender_test)
+        
+        display_and_save(test_res, log, result_path, tag=key, item_cold=item_cold)
     
 
 if __name__ == '__main__':

@@ -106,7 +106,7 @@ class Dataset(object):
         # load training set
         self.train_mat = self.load_data(self.train_folder, set_tag='train')
         self.valid_mat = self.load_data(self.valid_folder, set_tag='valid')
-        self.test_mat = self.load_data(self.test_folder, set_tag='test')
+        self.test_mat = self.load_data(self.test_folder, set_tag='test') # test_mat is a dict of matrices
         if self.train_mat is None or self.valid_mat is None or self.test_mat is None:
             exit(0)
         self.x_len_max, self.y_len_max = self.get_max_seq_len()
@@ -170,10 +170,14 @@ class Dataset(object):
             y_mat = [data['y'] for data in self.valid_mat]
         # test set
         elif set_tag == 'test':
-            x_len = [len(data['x']) for data in self.test_mat]
-            y_len = [len(data['y']) for data in self.test_mat]
-            x_mat = [data['x'] for data in self.test_mat]
-            y_mat = [data['y'] for data in self.test_mat]
+            res_dict = {}
+            for key in self.test_mat.keys():
+                x_len = [len(data['x']) for data in self.test_mat[key]]
+                y_len = [len(data['y']) for data in self.test_mat[key]]
+                x_mat = [data['x'] for data in self.test_mat[key]]
+                y_mat = [data['y'] for data in self.test_mat[key]]
+                res_dict[key] = [x_len, y_len, x_mat, y_mat]
+            return res_dict
         # negative sampling
         if neg_samp is True:
             y_neg_len, y_neg_mat = self.get_neg_data(x_mat, y_mat, k=neg_pos_ratio)
@@ -293,8 +297,8 @@ class Dataset(object):
         y_train_len = [len(data['y']) for data in self.train_mat]
         x_valid_len = [len(data['x']) for data in self.valid_mat]
         y_valid_len = [len(data['y']) for data in self.valid_mat]
-        x_test_len = [len(data['x']) for data in self.test_mat]
-        y_test_len = [len(data['y']) for data in self.test_mat]
+        x_test_len = [len(data['x']) for key in self.test_mat.keys() for data in self.test_mat[key]]
+        y_test_len = [len(data['y']) for key in self.test_mat.keys() for data in self.test_mat[key]]
         x_len_max = max(max(x_train_len), max(x_valid_len), max(x_test_len))
         y_len_max = max(max(y_train_len), max(y_valid_len), max(y_test_len))
         return x_len_max, y_len_max
@@ -322,29 +326,62 @@ class Dataset(object):
             print("Load existed {} matrix cache successfully!".format(set_tag))
             return data_mat
         # load data matrix from json file
-        print("Load data matrix from {}...".format(data_folder))
-        data_mat = []
-        if not os.path.exists(data_folder):
-            print("[Dataset] {} folder not exists!".format(data_folder))
-            return None
-        json_files = os.listdir(data_folder)
-        if len(json_files) < 1:
-            print("[Dataset] No json file found in {}!".format(data_folder))
-            return None
-        for idx in range(len(json_files)):
-            print("Load json file {} ({}/{})".format(json_files[idx], idx + 1, len(json_files)))
-            data_raw = self.load_json(data_folder + '/' + json_files[idx])
-            for data in tqdm(data_raw):
-                data_x = data['x']
-                data_y = data['y']
-                data_x_n = [track['track_id'] for track in data_x]
-                # single y for prediction in training set
-                if type(data_y) is dict:
-                    data_y_n = [data_y['track_id']]
-                else:
-                    data_y_n = [track['track_id'] for track in data_y]
-                data_mat.append({'x': data_x_n, 'y': data_y_n})
-        print("{} data loaded: {}".format(set_tag, len(data_mat)))
+        if set_tag == 'train' or set_tag == 'valid':
+            print("Load data matrix from {}...".format(data_folder))
+            data_mat = []
+            if not os.path.exists(data_folder):
+                print("[Dataset] {} folder not exists!".format(data_folder))
+                return None
+            json_files = os.listdir(data_folder)
+            if len(json_files) < 1:
+                print("[Dataset] No json file found in {}!".format(data_folder))
+                return None
+            for idx in range(len(json_files)):
+                print("Load json file {} ({}/{})".format(json_files[idx], idx + 1, len(json_files)))
+                data_raw = self.load_json(data_folder + '/' + json_files[idx])
+                for data in tqdm(data_raw):
+                    data_x = data['x']
+                    data_y = data['y']
+                    data_x_n = [track['track_id'] for track in data_x]
+                    # single y for prediction in training set
+                    if type(data_y) is dict:
+                        data_y_n = [data_y['track_id']]
+                    else:
+                        data_y_n = [track['track_id'] for track in data_y]
+                    data_mat.append({'x': data_x_n, 'y': data_y_n})
+            print("{} data loaded: {}".format(set_tag, len(data_mat)))
+        else:
+            print("Load data matrix from {}...".format(data_folder))
+            test_dirs = os.listdir(data_folder)
+            if not len(test_dirs) > 0:
+                print("[Dataset] No json file found in {}!".format(data_folder))
+            data_all_dict = {}
+            for test_folder in test_dirs:
+                data_mat = []
+                data_path = data_folder + '/' + test_folder
+                if not os.path.exists(data_path):
+                    print("[Dataset] {} folder not exists!".format(data_path))
+                    return None
+                json_files = os.listdir(data_path)
+                if len(json_files) < 1:
+                    print("[Dataset] No json file found in {}!".format(data_path))
+                    return None
+                for idx in range(len(json_files)):
+                    print("Load json file {} ({}/{})".format(json_files[idx], idx + 1, len(json_files)))
+                    data_raw = self.load_json(data_path + '/' + json_files[idx])
+                    for data in tqdm(data_raw):
+                        data_x = data['x']
+                        data_y = data['y']
+                        data_x_n = [track['track_id'] for track in data_x]
+                        # single y for prediction in training set
+                        if type(data_y) is dict:
+                            data_y_n = [data_y['track_id']]
+                        else:
+                            data_y_n = [track['track_id'] for track in data_y]
+                        data_mat.append({'x': data_x_n, 'y': data_y_n})
+                print("{} data loaded: {}".format(test_folder, len(data_mat)))
+                data_all_dict[test_folder] = data_mat
+            data_mat = data_all_dict
         # save to cache file
         with open(data_mat_path, 'wb') as f:
             pickle.dump(data_mat, f)

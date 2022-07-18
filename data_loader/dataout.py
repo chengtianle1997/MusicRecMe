@@ -397,6 +397,8 @@ def valid_echo_nest(dataset_root, line_num=1000, old_new_gap='2008-01-01', sub=T
 class data_json(object):
     def __init__(self, path, identifier='train', max_length=100):
         self.path = path
+        if not os.path.exists(path):
+            os.makedirs(path)
         self.file_counter = 0
         self.max_length = max_length
         self.iden = identifier
@@ -563,7 +565,12 @@ def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_g
     # init train, valid, test json
     train_json = data_json(train_path, identifier='train')
     valid_json = data_json(valid_path, identifier='valid')
-    test_json = data_json(test_path, identifier='test')
+    test_user_item_cold_json = data_json(test_path + '/user_item_cold', identifier='test')
+    test_item_cold_json = data_json(test_path + '/item_cold', identifier='test')
+    test_user_cold_5_json = data_json(test_path + '/user_cold_5', identifier='test')
+    test_user_cold_10_json = data_json(test_path + '/user_cold_10', identifier='test')
+    test_user_cold_25_json = data_json(test_path + '/user_cold_25', identifier='test')
+    test_user_cold_50_json = data_json(test_path + '/user_cold_50', identifier='test')
     # start from the last progress
     #line_valid_counter = train_json.exist_num() + valid_json.exist_num() + test_json.exist_num()
     #start_line = line_valid_counter
@@ -603,6 +610,19 @@ def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_g
                         song_json_train[song['track_id']] = song
                 #save_song_json(song_json_train_url, song_json_train)
 
+                # for item cold scenario (including cold start songs)
+                if line_valid_counter >= int(0.875 * train_num):
+                    res_dict = {}
+                    res_dict['x'] = playlist[0: max(int(2 * end_pos - len(playlist)), int(0.5 * len(playlist)))]
+                    res_dict['y'] = playlist[max(int(2 * end_pos - len(playlist)), int(0.5 * len(playlist))):]
+                    if len(res_dict['y']) >= 5 and len(res_dict['x']) >= 5:
+                        test_item_cold_json.insert(res_dict)
+                        # save songs to song json test
+                        for song in playlist:
+                            if not song['track_id'] in song_json_test.keys():
+                                song_json_test[song['track_id']] = song
+
+
             elif line_valid_counter >= train_num and line_valid_counter < train_num + valid_num:
                 if line_valid_counter == train_num:
                     # save the last train json
@@ -617,6 +637,7 @@ def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_g
                         song_json_train[song['track_id']] = song
                 #save_song_json(song_json_train_url, song_json_train)
 
+
             else:
                 if line_valid_counter == train_num + valid_num:
                     # save the last valid json
@@ -626,10 +647,35 @@ def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_g
                 # res_dict['y'] = playlist[int(x_y_ratio * end_pos):]
                 # res_dict['x'] = playlist[0: int(0.5 * len(playlist))]
                 # res_dict['y'] = playlist[int(0.5 * len(playlist)):]
-                res_dict['x'] = playlist[0: int(2 * end_pos - len(playlist))]
-                res_dict['y'] = playlist[int(2 * end_pos - len(playlist)):]
 
-                test_json.insert(res_dict)
+                # for user-item cold start scenario
+                res_dict['x'] = playlist[0: max(int(2 * end_pos - len(playlist)), int(0.5 * len(playlist)))]
+                res_dict['y'] = playlist[max(int(2 * end_pos - len(playlist)), int(0.5 * len(playlist))):]
+                if len(res_dict['x']) >= 5 and len(res_dict['y']) >= 5:
+                    test_user_item_cold_json.insert(res_dict)
+
+                # for user cold start scenario
+                if end_pos >= 10:
+                    res_dict = {}
+                    res_dict['x'] = playlist[0:5]
+                    res_dict['y'] = playlist[5: end_pos + 1]
+                    test_user_cold_5_json.insert(res_dict)
+                if end_pos >= 20:
+                    res_dict = {}
+                    res_dict['x'] = playlist[0:10]
+                    res_dict['y'] = playlist[10: end_pos + 1]
+                    test_user_cold_10_json.insert(res_dict)
+                if end_pos >= 50:
+                    res_dict = {}
+                    res_dict['x'] = playlist[0:25]
+                    res_dict['y'] = playlist[25: end_pos + 1]
+                    test_user_cold_25_json.insert(res_dict)
+                if end_pos >= 100:
+                    res_dict = {}
+                    res_dict['x'] = playlist[0:100]
+                    res_dict['y'] = playlist[100: end_pos + 1]
+                    test_user_cold_50_json.insert(res_dict)
+
                 # save songs to song json test
                 for song in playlist:
                     if not song['track_id'] in song_json_test.keys():
@@ -644,7 +690,12 @@ def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_g
 
     train_json.save()
     valid_json.save()
-    test_json.save()
+    test_user_item_cold_json.save()
+    test_item_cold_json.save()
+    test_user_cold_5_json.save()
+    test_user_cold_10_json.save()
+    test_user_cold_25_json.save()
+    test_user_cold_50_json.save()
 
     save_song_json(song_json_url, song_json)
     save_song_json(song_json_train_url, song_json_train)

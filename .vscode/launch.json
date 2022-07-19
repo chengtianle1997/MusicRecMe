@@ -58,8 +58,8 @@
                 //"--sub",  // sub dataset for debugging and testing
                 "--gen",
                 //"--meta",
-                "--audio", "musicnn",
-                //"--audio", "None",
+                //"--audio", "musicnn",
+                "--audio", "None",
                 //"--lyric", "tf_idf",
                 "--lyric", "None",
                 "--lr", "1e-3",

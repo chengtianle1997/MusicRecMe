@@ -665,12 +665,12 @@ def generate_dataset(dataset_root, database='musicdbn', line_num=None, old_new_g
                     res_dict['x'] = playlist[0:10]
                     res_dict['y'] = playlist[10: end_pos + 1]
                     test_user_cold_10_json.insert(res_dict)
-                if end_pos >= 50:
+                if end_pos >= 35:
                     res_dict = {}
                     res_dict['x'] = playlist[0:25]
                     res_dict['y'] = playlist[25: end_pos + 1]
                     test_user_cold_25_json.insert(res_dict)
-                if end_pos >= 100:
+                if end_pos >= 60:
                     res_dict = {}
                     res_dict['x'] = playlist[0:100]
                     res_dict['y'] = playlist[100: end_pos + 1]

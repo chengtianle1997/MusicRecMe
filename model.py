@@ -363,8 +363,14 @@ class MusicRecommenderSequenceEmbed(object):
             self.song_dict = dataset.train_song_dict
             self.song_mat_ori = torch.tensor(dataset.train_song_mat).to(device)
         elif mode == 'test':
-            self.song_dict = dataset.test_song_dict
-            self.song_mat_ori = torch.tensor(dataset.test_song_mat).to(device)
+            # recommend only from the test set
+            # self.song_dict = dataset.test_song_dict
+            # self.song_mat_ori = torch.tensor(dataset.test_song_mat).to(device)
+
+            # recommend from the whole dataset
+            self.song_dict = dataset.song_dict
+            self.song_mat_ori = torch.tensor(dataset.song_mat).to(device)
+
             self.song_old_new_dict = dataset.song_old_new_dict
             # statistics for old new distribution
             old_song_count = 0
@@ -655,22 +661,25 @@ class UserAttention(nn.Module):
 
         # return sequence embedding by PCA
         if self.return_seq is True:
+            
             # return the first K
-            seq_embed = x[:, 0: self.seq_k, :].view(x.shape[0], self.seq_k, -1)
-            seq_embed_k = seq_embed.view(seq_embed.shape[0], seq_embed.shape[1], 1, seq_embed.shape[2])
-            x_input_k = x_input.view(x_input.shape[0], 1, x_input.shape[1], x_input.shape[2])
-            cos_sim_ref = self.cos_sim(seq_embed_k, x_input_k)
-            # mask
-            mask_ = mask[:, 0, :, 0].to(torch.float32)
-            mask_ = mask_.view(x_input.shape[0], 1, x_input.shape[1]) # [batch, 1, seq_len]
-            mask_x = mask_.repeat(1, self.seq_k, 1) # [batch, k, seq_len]
-            mask_ = mask_.view(x_input.shape[0], x_input.shape[1]) # [batch, seq_len]
-            mask_ = mask_.sum(dim=-1).view(x_input.shape[0], 1).repeat(1, self.seq_k) # [batch, k]
-            cos_sim_ref = cos_sim_ref * mask_x  # [batch, k, seq_len]
-            cos_sim_ref = cos_sim_ref.sum(dim=-1) / mask_  # [batch, k]
-            cos_sim_sum = cos_sim_ref.sum(dim=-1).view(x_input.shape[0], 1).repeat(1, self.seq_k)  # [batch]
-            cos_sim_ref = cos_sim_ref / cos_sim_sum  # [batch, k]
+            seq_embed = x[:, 0: min(self.seq_k, x.shape[1]), :].view(x.shape[0], min(self.seq_k, x.shape[1]), -1)
+            
+            # seq_embed_k = seq_embed.view(seq_embed.shape[0], seq_embed.shape[1], 1, seq_embed.shape[2])
+            # x_input_k = x_input.view(x_input.shape[0], 1, x_input.shape[1], x_input.shape[2])
+            # cos_sim_ref = self.cos_sim(seq_embed_k, x_input_k)
+            # # mask
+            # mask_ = mask[:, 0, :, 0].to(torch.float32)
+            # mask_ = mask_.view(x_input.shape[0], 1, x_input.shape[1]) # [batch, 1, seq_len]
+            # mask_x = mask_.repeat(1, self.seq_k, 1) # [batch, k, seq_len]
+            # mask_ = mask_.view(x_input.shape[0], x_input.shape[1]) # [batch, seq_len]
+            # mask_ = mask_.sum(dim=-1).view(x_input.shape[0], 1).repeat(1, self.seq_k) # [batch, k]
+            # cos_sim_ref = cos_sim_ref * mask_x  # [batch, k, seq_len]
+            # cos_sim_ref = cos_sim_ref.sum(dim=-1) / mask_  # [batch, k]
+            # cos_sim_sum = cos_sim_ref.sum(dim=-1).view(x_input.shape[0], 1).repeat(1, self.seq_k)  # [batch]
+            # cos_sim_ref = cos_sim_ref / cos_sim_sum  # [batch, k]
             # return seq_embed, cos_sim_ref
+            
             return seq_embed
             
             # return the whole sequence

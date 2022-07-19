@@ -62,11 +62,9 @@ def get_time_string(time):
 
 # mode = ['train', 'test'], the 'train' mode can also be used for valid set
 def _evaluate(args, model, x_tensor_list, y_tensor_list, x_len_list, y_len_list, \
-    x_tracks, y_tracks, recommender):
+    x_tracks, y_tracks, recommender, item_cold=False):
     # check mode
     mode = recommender.mode
-    # set to evaluation
-    model.eval()
     # get loss functions
     mse_loss = nn.MSELoss(reduction='none') # do not calculate mean or sum
     cos_sim_loss = nn.CosineSimilarity(dim=2) # cosine similarity on embedding dimension
@@ -76,10 +74,11 @@ def _evaluate(args, model, x_tensor_list, y_tensor_list, x_len_list, y_len_list,
     top_10_track_ids_list = []
     ground_truth_ids_list = []
     recalls_list = []
+    others_list = []
     recalls_old_list = []
     recalls_new_list = []
     # iterate batches
-    for i, data in tqdm(enumerate(x_tensor_list)):
+    for i in tqdm(range(len(x_tensor_list))):
         # get x and y
         x = x_tensor_list[i].to(device)
         x_len = x_len_list[i]
@@ -91,6 +90,8 @@ def _evaluate(args, model, x_tensor_list, y_tensor_list, x_len_list, y_len_list,
         # generate mask for y to calculate loss
         y_mask = Model.generate_out_mask(y_len).to(device)
         x_y_mask = Model.generate_out_mask(x_len).to(device)
+        # set to evaluation
+        model.eval()
         # prediction
         pred = model(x, x_mask)
         # calculate the loss
@@ -108,22 +109,26 @@ def _evaluate(args, model, x_tensor_list, y_tensor_list, x_len_list, y_len_list,
         # recommendation
         if mode == 'train':
             top_10_track_ids, top_10_track_mats, recalls, others = \
-                recommender.recommend(pred, x_tracks, y_tracks, return_songs=True)
+                recommender.recommend(pred, x_tracks[i * _batch_size: (i + 1)*_batch_size], y_tracks[i * _batch_size: (i + 1)*_batch_size], return_songs=True)
         elif mode == 'test':
             top_10_track_ids, top_10_track_mats, recalls, recalls_old, recalls_new, others = \
-                recommender.recommend(pred, x_tracks, y_tracks, return_songs=True)
+                recommender.recommend(pred, x_tracks[i * _batch_size: (i + 1)*_batch_size], y_tracks[i * _batch_size: (i + 1)*_batch_size], return_songs=True)
             recalls_new_list.append(recalls_new)
             recalls_old_list.append(recalls_old)
         
+
         recalls_list.append(recalls)
+        others_list.append(others)
         top_10_track_ids_list += top_10_track_ids
     
     # calculate the mean of those loss and recalls
     res_dict = {}
     loss = sum(loss_list) / len(loss_list)
     recalls = np.array(recalls_list).mean(axis=0)
+    others = np.array(others_list).mean(axis=0)
     res_dict['loss'] = loss
     res_dict['recalls'] = recalls
+    res_dict['others'] = others
     res_dict['gt'] = ground_truth_ids_list
     res_dict['predict'] = top_10_track_ids_list
     if mode == 'test':
@@ -144,6 +149,9 @@ def display_and_save(res_dict, log, result_path, tag='valid', item_cold=False):
             .format(res_dict['recalls_old'][0], res_dict['recalls_old'][1], res_dict['recalls_old'][2]))
         log.print('Recalls (New): @10 {}, @50 {}, @100 {}'\
             .format(res_dict['recalls_new'][0], res_dict['recalls_new'][1], res_dict['recalls_new'][2]))
+    log.print('R-prec: {}, NDCG: {}, Clicks: {}'\
+        .format(res_dict['others'][2], res_dict['others'][1], res_dict['others'][3]))
+    
     # save the res_dict
     with open(result_path + '/' + tag + '.pkl', 'wb') as f:
         pickle.dump(res_dict, f)
@@ -173,6 +181,7 @@ def evaluate(args):
     time_stamp = datetime.datetime.now()
     time_string = get_time_string(time_stamp)
     log = logger.logger(result_path, time=time_stamp)
+    
     # load dataset
     dataset = data_loader.Dataset(dataset_root='E:', sub=args.sub, genre=args.gen, meta=args.meta, \
         audio=args.audio, lyric=args.lyric, outdir=cache_folder, dim_list=[0, 0, 200, 0] if use_music_embedding or not use_data_pca else [0, 0, 200, 200])
@@ -180,11 +189,16 @@ def evaluate(args):
     log.print("dataset loaded:")
     log.print("music embed dim: {} [{}, {}, {}, {}]".format(music_embed_dim, music_embed_dim_list[0], \
         music_embed_dim_list[1], music_embed_dim_list[2], music_embed_dim_list[3]))
+    
     # load valid set
     valid_data_list = dataset.get_data(set_tag='valid')
     valid_data_batch =  args.batch
     x_valid_len_list, y_valid_len_list, x_valid_tensor_list, y_valid_tensor_list = \
         dataset.get_batched_data(valid_data_list, batch_size=valid_data_batch, fix_length=False)
+    # get track id list for valid and test set
+    x_valid_tracks = valid_data_list[2]
+    y_valid_tracks = valid_data_list[3]
+    
     # load test set
     test_data_dict = dataset.get_data(set_tag='test')
     test_data_batch = args.batch
@@ -201,9 +215,7 @@ def evaluate(args):
 
     valid_len = len(x_valid_len_list) * valid_data_batch
     log.print("{} playlists found for valid".format(valid_len))
-    # get track id list for valid and test set
-    x_valid_tracks = valid_data_list[2]
-    y_valid_tracks = valid_data_list[3]
+    
     
     # check loss type
     if loss_type not in loss_type_list:

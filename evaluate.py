@@ -184,7 +184,8 @@ def evaluate(args):
     
     # load dataset
     dataset = data_loader.Dataset(dataset_root='E:', sub=args.sub, genre=args.gen, meta=args.meta, \
-        audio=args.audio, lyric=args.lyric, outdir=cache_folder, dim_list=[0, 0, 200, 0] if use_music_embedding or not use_data_pca else [0, 0, 200, 200])
+        audio=args.audio, lyric=args.lyric, outdir=cache_folder, \
+        dim_list=[0, 0, 200, 0] if use_music_embedding or not use_data_pca else [0, 0, 200, 0])
     music_embed_dim, music_embed_dim_list = dataset.get_dim()
     log.print("dataset loaded:")
     log.print("music embed dim: {} [{}, {}, {}, {}]".format(music_embed_dim, music_embed_dim_list[0], \

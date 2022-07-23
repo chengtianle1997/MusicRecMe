@@ -453,6 +453,142 @@ class MusicRecommenderSequenceEmbed(object):
             # get track ids
             top_k_track = [self.rev_song_dict[int(i)] for i in top_k_index]
             top_10_track_list.append(top_k_track)
+            #top_10_track_list.append(top_k_track)
+            for n in range(10):
+                top_10_track_mat[i, n, :] = self.song_mat[int(top_k_index[n])]
+            # get intersection of predicted track and groud truth tracks
+            recalls_num = get_recalls(y_valid_tracks[i], top_k_track)
+            ap_list.append(get_ap(y_valid_tracks[i], top_k_track))
+            ndcg_list.append(get_ndcg(y_valid_tracks[i], top_k_track))
+            r_prec_list.append(get_r_prec(y_valid_tracks[i], top_k_track))
+            clicks_list.append(get_clicks(y_valid_tracks[i], top_k_track))
+            # gt_set = set(y_valid_tracks[i])
+            # # top 10, 50, 100 recall
+            # top_10_inter = set(top_k_track[0:10]) & gt_set
+            # top_50_inter = set(top_k_track[0:50]) & gt_set
+            # top_100_inter = set(top_k_track[0:100]) & gt_set
+            recalls_num_counter = recalls_num_counter + recalls_num
+            if self.mode == 'test':
+                # recalls for old and new songs
+                y_valid_tracks_new = [track for track in y_valid_tracks[i] if self.song_old_new_dict[track]==1]
+                y_valid_tracks_old = [track for track in y_valid_tracks[i] if self.song_old_new_dict[track]==0]
+                recalls_new = get_recalls(y_valid_tracks_new, top_k_track)
+                recalls_old = get_recalls(y_valid_tracks_old, top_k_track)
+                recalls_new_num_counter += recalls_new
+                recalls_old_num_counter += recalls_old
+
+        #self.song_mat = self.song_mat.to('cpu')
+        # self.song_mat_ori = self.song_mat_ori.to('cpu')
+        torch.cuda.empty_cache()
+        
+        recalls = [recalls_num_counter[0] / recalls_num_counter[3], \
+                    recalls_num_counter[1] / recalls_num_counter[3], \
+                    recalls_num_counter[2] / recalls_num_counter[3]]
+
+        mean_avg_prec = sum(ap_list) / len(ap_list)
+        mean_ndcg = sum(ndcg_list) / len(ndcg_list)
+        mean_r_prec = sum(r_prec_list) / len(r_prec_list)
+        mean_clicks = sum(clicks_list) / len(clicks_list)
+
+        if return_songs is True:
+            if self.mode == 'test':
+                recalls_new = [recalls_new_num_counter[0] / recalls_new_num_counter[3], \
+                    recalls_new_num_counter[1] / recalls_new_num_counter[3], \
+                    recalls_new_num_counter[2] / recalls_new_num_counter[3]]
+                recalls_old = [recalls_old_num_counter[0] / recalls_old_num_counter[3], \
+                    recalls_old_num_counter[1] / recalls_old_num_counter[3], \
+                    recalls_old_num_counter[2] / recalls_old_num_counter[3]]
+                top_10_track_list, top_10_track_mat
+                return top_10_track_list, top_10_track_mat, recalls, recalls_old, recalls_new, [mean_avg_prec, mean_ndcg, mean_r_prec, mean_clicks]
+            else:
+                return top_10_track_list, top_10_track_mat, recalls, [mean_avg_prec, mean_ndcg, mean_r_prec, mean_clicks]
+        else:
+            # return only the recall rate
+            return recalls, [mean_avg_prec, mean_ndcg, mean_r_prec, mean_clicks]
+
+
+class MusicRecommenderClass(object):
+    '''
+    Recommend songs according to song dictionary and user embedding
+    '''
+    def __init__(self, dataset, device='cpu', mode='train', model=None, use_music_embedding=False):
+        
+        self.device = device
+        self.mode = mode
+
+        if mode == 'train':
+            self.song_dict = dataset.train_song_dict
+            self.song_mat = torch.tensor(dataset.train_song_mat).to(device)
+        elif mode == 'test':
+            # recommend only from the test set
+            # self.song_dict = dataset.test_song_dict
+            # self.song_mat_ori = torch.tensor(dataset.test_song_mat).to(device)
+
+            # recommend from the whole dataset
+            self.song_dict = dataset.song_dict
+            self.song_mat = torch.tensor(dataset.song_mat).to(device)
+
+        if mode == 'test':
+
+            self.song_old_new_dict = dataset.song_old_new_dict
+            # statistics for old new distribution
+            old_song_count = 0
+            new_song_count = 0
+            for song in self.song_dict.keys():
+                if self.song_old_new_dict[song] == 1:
+                    new_song_count += 1
+                else:
+                    old_song_count += 1
+            print("{} songs in test set: old: {} ({}%) ,new: {} ({}%)"\
+                .format(len(self.song_dict), old_song_count, old_song_count * 100 / len(self.song_dict), \
+                new_song_count, new_song_count * 100 / len(self.song_dict)))
+        # reshape: song_mat = [song_num, song_embed_dim, 1]
+        # reverse song dict to find track by index
+        self.rev_song_dict = {v: k for k, v in self.song_dict.items()}
+    
+    # recommend songs according to cosine similarity (for multi-users at once)
+    # user_embed[]: user embedding from UserAttention model [batch_size, seq_x_len, user_embed_dim]
+    # x_valid_tracks []: given track ids in x (not embeddings) [batch_size, seq_x_len]
+    # y_valid_tracks []: ground truth track ids (not embeddings) [batch_size, seq_y_len]
+    # return_songs: whether return recommended track ids or not
+    # top_k: return top K recommended songs
+    def recommend(self, pred, x_valid_tracks, y_valid_tracks, return_songs=False, model=None, top_k=100):
+        # get music embedding
+        # if self.use_music_embedding is True and self.model is not None:
+        #     self.song_mat = self.model.module.music_embed(self.song_mat_ori)
+        # user_embed = user_embed.to(self.device)
+        # get dimension
+        batch_size, song_num = \
+            pred.shape[0], pred.shape[1]
+        # init counters
+        top_10_recall_num = 0
+        top_50_recall_num = 0
+        top_100_recall_num = 0
+        ground_truth_num = 0
+        # numpy matrix to save recall numbers
+        recalls_num_counter = np.zeros(4)
+        recalls_old_num_counter = np.zeros(4)
+        recalls_new_num_counter = np.zeros(4)
+        top_10_track_list = []
+        ap_list = []
+        ndcg_list = []
+        r_prec_list = []
+        clicks_list = []
+        
+        #self.song_mat = self.song_mat.to(self.device)
+        # top_10_track_mat = [batch_size, 10, embed_dim]
+        top_10_track_mat = torch.zeros((batch_size, 10, self.song_mat.shape[1])).to(self.device)
+        # iterate through users
+        for i in range(batch_size):
+            # similarity = [song_num, 1]
+            similarity = pred[i, :]
+            # top_k_index = [top_k]
+            top_k_index = torch.topk(similarity.flatten(), top_k).indices
+            # get track embedding
+            # top_k_embed = [self.song_mat[int(i)] for i in top_k_index]
+            # get track ids
+            top_k_track = [self.rev_song_dict[int(i)] for i in top_k_index]
+            top_10_track_list.append(top_k_track)
             top_10_track_list.append(top_k_track)
             for n in range(10):
                 top_10_track_mat[i, n, :] = self.song_mat[int(top_k_index[n])]
@@ -505,6 +641,8 @@ class MusicRecommenderSequenceEmbed(object):
         else:
             # return only the recall rate
             return recalls, [mean_avg_prec, mean_ndcg, mean_r_prec, mean_clicks]
+
+
 
 class MultiheadAttention(nn.Module):
     # Multihead Attention
@@ -565,7 +703,7 @@ class UserAttention(nn.Module):
     '''
     def __init__(self, music_embed_dim, music_embed_dim_list, embed_dim=None, \
         dropout=0, num_heads=1, re_embed=False, return_seq=False, seq_k=5, \
-        check_baseline=False):
+        check_baseline=False, multi_layer=False):
         '''
         music_embed_dim: dimension of music embedding
         music_embed_dim_list []: list of [genre, meta, audio, lyric] dimension
@@ -585,6 +723,8 @@ class UserAttention(nn.Module):
         self.re_embed = re_embed
         self.check_baseline = check_baseline
 
+        self.multi_layer = multi_layer
+
         # re-embed audio and lyric for a smaller attention dim
         if re_embed is True:
             self.music_embed = MusicEmbedding(music_embed_dim, music_embed_dim_list)
@@ -595,6 +735,10 @@ class UserAttention(nn.Module):
         
         # multi-head self-attention layer
         self.self_attn = MultiheadAttention(self.music_embed_dim, self.embed_dim, self.num_heads)
+
+        if self.multi_layer:
+            self.self_attn_2 = MultiheadAttention(self.music_embed_dim, self.embed_dim, self.num_heads)
+            self.ffn2 = nn.Linear(self.embed_dim, self.embed_dim)
 
         # multi linear layers
         pass
@@ -608,7 +752,7 @@ class UserAttention(nn.Module):
         # feed forward network
         self.ffn = nn.Sequential(
             nn.Linear(self.embed_dim, self.embed_dim),
-            # nn.ReLU(),
+            nn.ReLU()
             # nn.Linear(self.embed_dim, self.embed_dim),
             # nn.ReLU(),
             # nn.Linear(self.embed_dim, self.embed_dim)
@@ -645,11 +789,23 @@ class UserAttention(nn.Module):
         attn_out, attn_weights = self.self_attn(x, mask=mask) # [batch_size, seq_length, embed_dim]
         # residual connection
         attn_out = torch.tanh(attn_out)
-        attn_out = self.attn_out_norm(attn_out) # [batch_size, seq_length, embed_dim]
-        x = x + self.dropout(attn_out)
 
-        # feed forward network
-        # x = self.ffn(attn_out)
+        if not self.multi_layer:
+            # original
+            attn_out = self.attn_out_norm(attn_out) # [batch_size, seq_length, embed_dim]
+            x = x + self.dropout(attn_out)
+        else:
+            # multi-layer attention
+            # feed forward network
+            attn_out = self.ffn(attn_out)
+            x = x + attn_out
+            x = self.attn_out_norm(x)
+            # the second self attention
+            attn_out, attn_weights = self.self_attn_2(x, mask=mask)
+            attn_out = torch.tanh(attn_out)
+            attn_out = self.ffn2(attn_out)
+            x = x + attn_out
+
         
         # # residual connection
         # x = x + attn_out
@@ -704,6 +860,148 @@ class UserAttention(nn.Module):
         x = self.ffn(x)
         
         return x
+
+
+# nn classifier instead of cosine similarity
+class UserAttentionNN(nn.Module):
+
+    '''
+    The user embedding model with attention on their playlists
+    '''
+    def __init__(self, music_embed_dim, music_embed_dim_list, embed_dim=None, \
+        dropout=0, num_heads=1, re_embed=False, return_seq=False, seq_k=5, \
+        check_baseline=False, multi_layer=False):
+        '''
+        music_embed_dim: dimension of music embedding
+        music_embed_dim_list []: list of [genre, meta, audio, lyric] dimension
+        embed_dim: embedding dimension for Q, K, V projection in multi-head attention
+        dropout: dropout rate
+        '''
+        super().__init__()
+
+        self.out_dim = music_embed_dim
+        self.music_embed_dim = music_embed_dim
+        self.num_heads = num_heads
+        self.embed_dim = embed_dim
+
+        self.return_seq = return_seq
+        self.seq_k = seq_k
+
+        self.re_embed = re_embed
+        self.check_baseline = check_baseline
+
+        self.multi_layer = multi_layer
+
+        # re-embed audio and lyric for a smaller attention dim
+        if re_embed is True:
+            self.music_embed = MusicEmbedding(music_embed_dim, music_embed_dim_list)
+            self.music_embed_dim = self.music_embed.out_dim
+
+        if self.embed_dim is None:
+            self.embed_dim = self.music_embed_dim
+        
+        # multi-head self-attention layer
+        self.self_attn = MultiheadAttention(self.music_embed_dim, self.embed_dim, self.num_heads)
+
+        if self.multi_layer:
+            self.self_attn_2 = MultiheadAttention(self.music_embed_dim, self.embed_dim, self.num_heads)
+            self.ffn2 = nn.Linear(self.embed_dim, self.embed_dim)
+
+        # multi linear layers
+        pass
+
+        # normalize and dropout layer
+        self.attn_out_norm = nn.LayerNorm(self.embed_dim)
+        self.out_norm = nn.LayerNorm(self.embed_dim)
+        self.dropout = nn.Dropout(dropout)
+
+        
+        # feed forward network
+        self.ffn = nn.Sequential(
+            nn.Linear(self.embed_dim, self.embed_dim),
+            nn.ReLU()
+            # nn.Linear(self.embed_dim, self.embed_dim),
+            # nn.ReLU(),
+            # nn.Linear(self.embed_dim, self.embed_dim)
+        )
+
+        # de-embed
+        if self.re_embed is True:
+            self.de_embed = nn.Sequential(nn.ReLU(), nn.Linear(self.music_embed_dim, self.out_dim))
+
+        # classifier
+        self.classifier = nn.Sequential(
+            nn.Linear(2*self.embed_dim, 200),
+            nn.ReLU(),
+            nn.Linear(200, 50),
+            nn.ReLU(),
+            nn.Linear(50, 2),
+            nn.ReLU()
+        )
+
+        self.softmax = nn.Softmax(dim=1)
+
+    def load_song(self, song_mat):
+        self.song_mat = torch.tensor(song_mat).to(torch.float32).to('cuda')
+
+
+    def forward(self, x, mask=None):
+        # input x: [batch_size, seq_length, music_embed_dim]
+        # mask: [batch_size, seq_length, seq_length]
+
+        # for baseline
+        if self.check_baseline:
+            return x[:, :self.seq_k, :]
+        
+        x_input = x
+
+        # convert mask
+        if mask is not None:
+            mask = mask.reshape(mask.shape[0], 1, mask.shape[1], mask.shape[2]) # [batch_size, 1, seq_length, seq_length]
+            mask = mask.repeat(1, self.num_heads, 1, 1) # [batch_size, num_heads, seq_length, seq_length]
+        
+        # music embedding
+        if self.re_embed is True:
+            x = self.music_embed(x)
+
+        # attention
+        attn_out, attn_weights = self.self_attn(x, mask=mask) # [batch_size, seq_length, embed_dim]
+        # residual connection
+        attn_out = torch.tanh(attn_out)
+
+        attn_out = self.attn_out_norm(attn_out) # [batch_size, seq_length, embed_dim]
+        x = x + self.dropout(attn_out)
+
+        # sum among sequence
+        mask_ = mask[:, 0, :, 0].to(torch.float32)
+        mask_x = mask_.view(x.shape[0], x.shape[1], 1).repeat(1, 1, x.shape[2])
+        x = x * mask_x
+        x = x.sum(dim=1) # [batch_size, embed_dim]
+        mask_ = mask_.sum(dim=-1).view(x.shape[0], 1).repeat(1, x.shape[1]) # [batch_size, 1]
+        x = x / mask_
+
+        # linear layers
+        x = self.ffn(x)
+
+        # classifier
+        batch_size = x.shape[0]
+        song_num = self.song_mat.shape[0]
+
+        x_out = torch.zeros(batch_size, song_num).to('cuda')
+
+        # iterate users (to save memory)
+        for i in range(batch_size):
+            u_embed = x[i, :]
+            u_embed = u_embed.reshape(1, self.embed_dim).repeat(song_num, 1) # [song_num, embed_dim]
+            # classifier
+            u_out = self.classifier(torch.cat((u_embed, self.song_mat), 1)) # [song_num, 2]
+            u_out = self.softmax(u_out)
+            # output
+            x_out[i, :] = u_out[:, 0]
+        
+        return x_out  # [batch_size, song_num]
+
+
 
 # Music re-embedding: Cannot support cpu training
 class MusicEmbedding(nn.Module):

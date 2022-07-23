@@ -24,8 +24,8 @@ from tqdm import tqdm
 batch_size = 50
 learning_rate = 1e-3
 early_stop_steps = 30 # early stopping triggered if over early_stop_steps no update
-loss_type = 'seq_cos' # 'cos' or 'rmse' or 'seq_cos'
-loss_type_list = ['rmse', 'cos', 'seq_cos', 'cross_entropy']
+loss_type = 'seq_cos'
+loss_type_list = ['rmse', 'cos', 'seq_cos', 'cross_entropy', 'classifier']
 seq_k = 10
 # about feature dimension
 use_music_embedding = False
@@ -35,6 +35,8 @@ include_x_loss = False
 include_neg_samples = True
 neg_loss_alpha = 0.5
 neg_pos_ratio = 10
+if loss_type == 'cross_entropy' or loss_type == 'classifier':
+    include_neg_samples = False
 # baseline without a model
 check_baseline = False
 # using multi label cross entropy loss
@@ -205,7 +207,7 @@ def train(args):
     else:
         x_train_len_list, y_train_len_list, x_train_tensor_list, y_train_tensor_list = \
             dataset.get_batched_data(train_data_list, batch_size=batch_size, fix_length=False)
-        if loss_type == 'cross_entropy':
+        if loss_type == 'cross_entropy' or 'classifier':
             x_train_onehot, x_train_inv_onehot, y_train_onehot = dataset.get_onehot_data(train_data_list)
         
     x_train_tracks = train_data_list[2]
@@ -221,7 +223,7 @@ def train(args):
     else:
         x_valid_len_list, y_valid_len_list, x_valid_tensor_list, y_valid_tensor_list = \
             dataset.get_batched_data(valid_data_list, batch_size=valid_data_batch, fix_length=False)
-        if loss_type == 'cross_entropy':
+        if loss_type == 'cross_entropy' or 'classifier':
             x_valid_onehot, x_valid_inv_onehot, y_valid_onehot = dataset.get_onehot_data(valid_data_list, batch_size=valid_data_batch)
 
     train_len, valid_len = len(x_train_len_list) * batch_size, len(x_valid_len_list) * valid_data_batch
@@ -236,14 +238,20 @@ def train(args):
         log.print("Cannot support loss function type: {}".format(loss_type))
         exit
     # load model
-    model = Model.UserAttention(music_embed_dim, music_embed_dim_list, num_heads=args.head, \
-        return_seq=True if loss_type=='seq_cos' or 'cross_entropy' else False, seq_k=seq_k, re_embed=use_music_embedding, \
-        check_baseline=check_baseline)
+    if loss_type == 'classifier':
+        model = Model.UserAttentionNN(music_embed_dim, music_embed_dim_list)
+    else:
+        model = Model.UserAttention(music_embed_dim, music_embed_dim_list, num_heads=args.head, \
+            return_seq=True if loss_type=='seq_cos' or 'cross_entropy' else False, seq_k=seq_k, re_embed=use_music_embedding, \
+            check_baseline=check_baseline)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     mse_loss = nn.MSELoss(reduction='none') # do not calculate mean or sum
     cos_sim_loss = nn.CosineSimilarity(dim=2) # cosine similarity on embedding dimension
     seq_cos_loss = Model.SequenceEmbedLoss()
     seq_cross_entroopy_loss = Model.SequenceCrossEntropyLoss(dataset, device, multi_label=use_multi_label)
+    if loss_type == 'classifier':
+        cross_entropy_loss = nn.CrossEntropyLoss()
+    
     start_epoch = 0
     best_epoch = 0
     best_valid_loss = float('inf')
@@ -263,14 +271,20 @@ def train(args):
         log.print("Checkpoint found, start from epoch {}, loss: {}, valid loss:{}"\
             .format(start_epoch, loss, best_valid_loss))
     
+    if loss_type == 'classifier':
+        model.load_song(dataset.train_song_mat)
+    
     # move model to device
     model = nn.DataParallel(model) # designed for multi-GPUs
     model = model.to(device)
     optimizer_to(optimizer, device)
 
     # load recommender: move to cpu to calculate due to limited cuda memory
-    if loss_type == 'seq_cos' or 'cross_entropy':
+    if loss_type == 'seq_cos' or loss_type == 'cross_entropy':
         recommender = Model.MusicRecommenderSequenceEmbed(dataset, device, mode='train', \
+            model=model, use_music_embedding=use_music_embedding)
+    elif loss_type == 'classifier':
+        recommender = Model.MusicRecommenderClass(dataset, device, mode='train', \
             model=model, use_music_embedding=use_music_embedding)
     else:
         recommender = Model.MusicRecommender(dataset, device, model=model, \
@@ -302,7 +316,7 @@ def train(args):
             x_len = x_train_len_list[i]  # [batch_size]
             y = y_train_tensor_list[i].to(device)  # [batch_size, max_seq_len, music_embed_dim]
             y_len = y_train_len_list[i]
-            if loss_type == 'cross_entropy':
+            if loss_type == 'cross_entropy' or loss_type == 'classifier':
                 x_inv_oh = x_train_inv_onehot[i].to(device)
                 y_oh = y_train_onehot[i].to(device)
             if include_neg_samples:
@@ -340,7 +354,9 @@ def train(args):
                     loss = loss - neg_loss * neg_loss_alpha
             elif loss_type == 'cross_entropy':
                 loss = seq_cross_entroopy_loss(pred, x_inv_oh, y_oh, model=model if use_music_embedding else None)
-            
+            elif loss_type == 'classifier':
+                loss = cross_entropy_loss(pred, y_oh)
+
             torch.cuda.empty_cache()
             # back propagation
             if not check_baseline:
@@ -367,7 +383,7 @@ def train(args):
             x_valid_len = x_valid_len_list[i]
             y_valid = y_valid_tensor_list[i].to(device)
             y_valid_len = y_valid_len_list[i]
-            if loss_type == 'cross_entropy':
+            if loss_type == 'cross_entropy' or loss_type == 'classifier':
                 x_valid_inv_oh = x_valid_inv_onehot[i].to(device)
                 y_valid_oh = y_valid_onehot[i].to(device)
             if include_neg_samples:
@@ -402,7 +418,9 @@ def train(args):
                     valid_loss = valid_loss - valid_neg_loss * neg_loss_alpha
             elif loss_type == 'cross_entropy':
                 valid_loss = seq_cross_entroopy_loss(pred_valid, x_valid_inv_oh, y_valid_oh, model=model if use_music_embedding else None)
-            
+            elif loss_type == 'classifier':
+                valid_loss = cross_entropy_loss(pred_valid, y_valid_oh)
+
             valid_loss_list.append(valid_loss.item())
 
             # recommendation
@@ -417,19 +435,20 @@ def train(args):
             # top_10_track_mats = top_10_track_mats.to(device)
 
             # calculate loss for recommended tracks
-            if loss_type == 'rmse':
-                top_track_loss = Model.get_rmse_loss(mse_loss, top_10_track_mats[:, 0, :], \
-                    y_valid, y_valid_mask, model=model if use_music_embedding else None)
-            elif loss_type == 'cos':
-                top_track_loss = Model.get_cosine_sim_loss(cos_sim_loss, top_10_track_mats[:, 0, :], \
-                    y_valid, y_valid_mask, model=model if use_music_embedding else None)
-            elif loss_type == 'seq_cos':
-                top_track_loss = seq_cos_loss(top_10_track_mats, y_valid, y_valid_mask, \
-                    model=model if use_music_embedding else None)
-            elif loss_type == 'cross_entropy':
-                top_track_loss = seq_cross_entroopy_loss(top_10_track_mats, x_valid_inv_oh, y_valid_oh, model=model if use_music_embedding else None)
+            # if loss_type == 'rmse':
+            #     top_track_loss = Model.get_rmse_loss(mse_loss, top_10_track_mats[:, 0, :], \
+            #         y_valid, y_valid_mask, model=model if use_music_embedding else None)
+            # elif loss_type == 'cos':
+            #     top_track_loss = Model.get_cosine_sim_loss(cos_sim_loss, top_10_track_mats[:, 0, :], \
+            #         y_valid, y_valid_mask, model=model if use_music_embedding else None)
+            # elif loss_type == 'seq_cos':
+            #     top_track_loss = seq_cos_loss(top_10_track_mats, y_valid, y_valid_mask, \
+            #         model=model if use_music_embedding else None)
+            # elif loss_type == 'cross_entropy':
+            #     top_track_loss = seq_cross_entroopy_loss(top_10_track_mats, x_valid_inv_oh, y_valid_oh, model=model if use_music_embedding else None)
 
-            top_track_loss_list.append(top_track_loss.item())
+            # top_track_loss_list.append(top_track_loss.item())
+            top_track_loss_list.append(0)
 
         # take the average among batches
         valid_loss = sum(valid_loss_list) / len(valid_loss_list)

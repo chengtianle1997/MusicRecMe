@@ -60,8 +60,8 @@
                 //"--meta",
                 //"--audio", "musicnn",
                 "--audio", "None",
-                //"--lyric", "tf_idf",
-                "--lyric", "None",
+                "--lyric", "tf_idf",
+                //"--lyric", "None",
                 "--lr", "1e-3",
                 "-b", "50",
                 "--head", "1"

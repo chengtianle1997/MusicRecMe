@@ -56,7 +56,7 @@
                 "-e",
                 "-r", "E:",
                 //"--sub",  // sub dataset for debugging and testing
-                "--gen",
+                //"--gen",
                 //"--meta",
                 //"--audio", "musicnn",
                 "--audio", "None",

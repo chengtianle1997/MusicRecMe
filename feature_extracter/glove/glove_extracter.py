@@ -20,9 +20,11 @@ from nltk import SnowballStemmer
 
 # raw music file folder
 in_folder = 'dataset/base/lyric_raw'
-out_folder = 'dataset/base/glove_features'
+out_folder = 'dataset/base/glove_all_features'
 
 root_folder = 'dataset/base'
+
+use_top_words = False
 
 class GloveEmbedding(object):
     def __init__(self, root_folder, embed='glove.840B.300d'):
@@ -130,15 +132,22 @@ def extract_feature(in_folder, out_folder, root_folder, embed='glove.840B.300d')
                not token in en_stopwords]
         # stemming tokens
         # tokens = [stemmer.stem(token) for token in tokens]
-        # get most frequent
-        most_freq_tokens = get_most_freq_tokens(tokens)
-        # get glove embedding
-        glove_embed = glove.embed(most_freq_tokens)
+        if use_top_words:
+            # get most frequent
+            most_freq_tokens = get_most_freq_tokens(tokens)
+            # get glove embedding
+            glove_embed = glove.embed(most_freq_tokens)
+            # save most frequent tokens and their frequency
+            with open(out_freq_name, 'wb') as f:
+                pickle.dump(most_freq_tokens, f)
+        else:
+            # keep all word emnbeddings
+            glove_embed = glove.embed(tokens)
+            # take the mean of all word embeddings
+            glove_embed = glove_embed.mean(axis=0)
         # save embedding to npy file
         np.save(out_file_name, glove_embed)
-        # save most frequent tokens and their frequency
-        with open(out_freq_name, 'wb') as f:
-            pickle.dump(most_freq_tokens, f)
+        
 
 
 

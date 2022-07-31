@@ -746,6 +746,41 @@ class Dataset(object):
             # save audio matrix to cache file
             np.save(lyric_mat_path, lyric_mat)
             return lyric_mat
+        
+        elif self.lyric == 'glove_all' or self.lyric == 'bert':
+            lyric_mat = np.zeros((len(self.song_dict), lyric_feature_shape[1]))
+            unfound_track_counter = 0
+            for track_id in tqdm(self.song_dict.keys()):
+                ori_track_id = track_id
+                # convert track_id to file name
+                if not track_id.find("spotify") == -1:
+                    track_id = track_id.split(":")[2]
+                track_weights_pkl = track_id + '.pkl'
+                track_id += '.npy'
+                # make sure the file exists
+                if track_id in lyric_feature_files:
+                    track_mat = np.load(lyric_feature_root + '/' + track_id)
+                    # weighted average mixture
+                    # load weights, which is the frequency of the word token
+                    track_mat = track_mat.mean(axis=0)
+                    # mean mixture
+                    # track_mat = track_mat.mean(axis=0)
+                    # max mixture
+                    # track_mat = track_mat.max(axis=0)
+                    # save to audio matrix
+                    lyric_mat[self.song_dict[ori_track_id], :] = track_mat
+                else:
+                    unfound_track_counter += 1
+                    print("[Lyric feature]Unfound track No.{}: {}".format(unfound_track_counter, ori_track_id))
+                    continue
+            # # normalize among dim 0
+            # sum_of_dim = lyric_mat.sum(axis=0)
+            # # replace zeros with epsilon
+            # sum_of_dim[sum_of_dim < 1e-9] = 1e-9
+            # lyric_mat = lyric_mat / sum_of_dim[np.newaxis, :]
+            # save audio matrix to cache file
+            np.save(lyric_mat_path, lyric_mat)
+            return lyric_mat
 
 
 

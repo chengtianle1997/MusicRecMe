@@ -3,7 +3,8 @@
 
 import mysql.connector
 import json
-import api_key
+#import api_key
+from data_loader import api_key
 
 hostname = "localhost"
 user="root"

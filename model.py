@@ -581,7 +581,7 @@ class MusicRecommenderClass(object):
         # iterate through users
         for i in range(batch_size):
             # similarity = [song_num, 1]
-            similarity = pred[i, :]
+            similarity = pred[i, :].to(self.device)
             # top_k_index = [top_k]
             top_k_index = torch.topk(similarity.flatten(), top_k).indices
             # get track embedding

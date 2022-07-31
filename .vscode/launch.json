@@ -55,12 +55,13 @@
                 // Train recommendation model: train.py ----------
                 "-e",
                 "-r", "E:",
-                //"--sub",  // sub dataset for debugging and testing
-                //"--gen",
+                "--sub",  // sub dataset for debugging and testing
+                "--gen",
                 //"--meta",
                 //"--audio", "musicnn",
                 "--audio", "None",
                 "--lyric", "tf_idf",
+                //"--lyric", "glove",
                 //"--lyric", "None",
                 "--lr", "1e-3",
                 "-b", "50",

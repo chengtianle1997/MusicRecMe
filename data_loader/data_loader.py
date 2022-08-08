@@ -604,8 +604,9 @@ class Dataset(object):
                     continue
         
         # old version
-        # sum_of_dim = audio_mat.sum(axis=0)
-        # audio_mat = audio_mat / sum_of_dim[np.newaxis, :]
+        # std = audio_mat.std(axis=0)
+        # std[std < 1e-9] = 1e-9
+        # audio_mat = (audio_mat - audio_mat.mean(axis=0)) / std[np.newaxis, :]
         
         # normalize the dim 0
         # ptp = audio_mat.ptp(axis=0)
@@ -748,7 +749,7 @@ class Dataset(object):
             return lyric_mat
         
         elif self.lyric == 'glove_all' or self.lyric == 'bert':
-            lyric_mat = np.zeros((len(self.song_dict), lyric_feature_shape[1]))
+            lyric_mat = np.zeros((len(self.song_dict), lyric_feature_shape[0]))
             unfound_track_counter = 0
             for track_id in tqdm(self.song_dict.keys()):
                 ori_track_id = track_id
@@ -762,7 +763,6 @@ class Dataset(object):
                     track_mat = np.load(lyric_feature_root + '/' + track_id)
                     # weighted average mixture
                     # load weights, which is the frequency of the word token
-                    track_mat = track_mat.mean(axis=0)
                     # mean mixture
                     # track_mat = track_mat.mean(axis=0)
                     # max mixture
